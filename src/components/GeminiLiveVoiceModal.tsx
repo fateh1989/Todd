@@ -289,7 +289,7 @@ export const GeminiLiveVoiceModal: React.FC<GeminiLiveVoiceModalProps> = ({
               <div className="flex items-center gap-2">
                 <h3 className="font-bold text-sm text-white">Gemini Live Voice • Todd</h3>
                 <span className="text-[10px] font-mono bg-cyan-950 text-cyan-300 border border-cyan-800 px-2 py-0.5 rounded-full">
-                  gemini-3.8-live
+                  gemini-2.0-flash-exp
                 </span>
               </div>
               <p className="text-xs text-slate-400">

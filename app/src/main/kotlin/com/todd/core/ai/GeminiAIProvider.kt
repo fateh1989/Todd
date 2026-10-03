@@ -1,9 +1,17 @@
 package com.todd.core.ai
 
+import com.google.firebase.Firebase
+import com.google.firebase.vertexai.type.GenerativeModel
+import com.google.firebase.vertexai.vertexAI
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
 class GeminiAIProvider(
-    private val apiKeyProvider: () -> String?
+    private val modelName: String = "gemini-2.0-flash"
 ) : AIProvider {
+
     override val type: ProviderType = ProviderType.CLOUD_GEMINI
+
     override val capabilities: ProviderCapabilities = ProviderCapabilities(
         supportsText = true,
         supportsStreaming = true,
@@ -14,20 +22,30 @@ class GeminiAIProvider(
         isLocal = false
     )
 
-    override suspend fun isAvailable(): Boolean {
-        val key = apiKeyProvider()
-        return !key.isNullOrBlank()
+    private var generativeModel: GenerativeModel? = null
+
+    init {
+        try {
+            generativeModel = Firebase.vertexAI.generativeModel(modelName = modelName)
+        } catch (_: Exception) {
+            generativeModel = null
+        }
     }
 
-    override suspend fun generateText(request: AIRequest): Result<AIResponse> {
+    override suspend fun isAvailable(): Boolean {
+        // Only available if Firebase Vertex AI has been successfully initialized
+        return generativeModel != null
+    }
+
+    override suspend fun generateText(request: AIRequest): Result<AIResponse> = withContext(Dispatchers.IO) {
+        val model = generativeModel
+            ?: return@withContext Result.failure(
+                IllegalStateException("Firebase Vertex AI is not initialized. Please ensure google-services.json is configured.")
+            )
+
         val start = System.currentTimeMillis()
-        val key = apiKeyProvider()
 
-        if (key.isNullOrBlank()) {
-            return Result.failure(IllegalStateException("Gemini API key is not configured"))
-        }
-
-        // Production-ready client call representation
+        // Build comprehensive context with system, project, screen, and selected text
         val contextPrompt = buildString {
             request.systemPrompt?.let { appendLine("System: $it\n") }
             request.projectContext?.let { appendLine("Project Context: $it\n") }
@@ -36,16 +54,23 @@ class GeminiAIProvider(
             appendLine("User: ${request.prompt}")
         }
 
-        val mockCloudResponse = "Todd [Gemini Cloud 2.5]: استجابة سحابية متقدمة مع تحليل السياق: ${request.prompt}"
+        try {
+            val response = model.generateContent(contextPrompt)
+            val responseText = response.text
+                ?: return@withContext Result.failure(IllegalStateException("Gemini returned empty content"))
 
-        return Result.success(
-            AIResponse(
-                text = mockCloudResponse,
-                providerUsed = ProviderType.CLOUD_GEMINI,
-                isVerified = true,
-                tokensUsed = contextPrompt.length / 4,
-                latencyMs = System.currentTimeMillis() - start
+            // Rule: EXECUTED != VERIFIED. Do not set isVerified=true automatically just because text was returned!
+            Result.success(
+                AIResponse(
+                    text = responseText,
+                    providerUsed = ProviderType.CLOUD_GEMINI,
+                    isVerified = false,
+                    tokensUsed = (contextPrompt.length + responseText.length) / 4,
+                    latencyMs = System.currentTimeMillis() - start
+                )
             )
-        )
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
     }
 }

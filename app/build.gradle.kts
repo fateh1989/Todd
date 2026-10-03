@@ -3,6 +3,7 @@ plugins {
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.google.services)
 }
 
 android {
@@ -19,18 +20,8 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
-    signingConfigs {
-        create("debugConfig") {
-            storeFile = file("${rootDir}/debug.keystore")
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
-        }
-    }
-
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("debugConfig")
             isDebuggable = true
         }
         release {
@@ -74,6 +65,11 @@ dependencies {
     // Coroutines
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
+
+    // Firebase official BoM & AI Logic (Vertex AI) & App Check
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.vertexai)
+    implementation(libs.firebase.appcheck)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)

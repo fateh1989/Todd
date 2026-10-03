@@ -27,7 +27,7 @@ class GeminiLiveVoiceTest {
             context = mockContext as Context,
             rulesEngine = rulesEngine,
             repository = mockRepo as ToddRepository,
-            apiKeyProvider = { "fake-gemini-key-for-test" }
+            liveModelName = "gemini-2.0-flash-exp"
         )
     }
 
