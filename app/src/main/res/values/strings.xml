@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Todd</string>
+    <string name="keyboard_label">Todd Keyboard</string>
+    <string name="accessibility_service_description">Todd uses accessibility to inspect UI hierarchy and visible text on your screen only when explicitly requested, helping you explain errors, translate or reply.</string>
+</resources>

@@ -1,0 +1,7 @@
+{
+  "name": "Todd — Personal Hybrid AI Agent",
+  "description": "Private, persistent, always-available personal AI agent for Android with floating controls, keyboard IME, and hybrid local/cloud intelligence.",
+  "permissions": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
