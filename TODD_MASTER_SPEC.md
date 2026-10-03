@@ -2022,3 +2022,797 @@ The final user experience should feel simple even though the internal system is 
 Build Todd to be useful every day, not merely impressive in a demo. Build it so the owner can trust what it says about the state of real work. Build it so a task can begin on the phone, continue remotely for hours, survive disconnection, and return with evidence. Build it so privacy and permissions remain under the owner's control. Build it so future AI models can be swapped without rebuilding the product.
 
 This document is binding until the owner changes it.
+
+
+---
+
+# 121. Persistent-agent behavior in day-to-day use
+
+Todd should behave as if it has an ongoing job rather than a temporary conversation. When the owner gives it a broad goal, Todd should create a durable responsibility record, derive specific tasks, and continue within granted permissions until the goal is completed, paused, blocked, cancelled, or replaced.
+
+A responsibility may have no immediate final endpoint. Examples include maintaining a software project, reviewing a recurring stream of information, watching a repository, keeping a knowledge base organized, or preparing recurring summaries. These responsibilities must have a visible status and an owner-editable description so Todd never expands scope silently.
+
+When Todd finishes a subtask, it should decide whether the overall responsibility is complete. A successful subtask is not automatically a completed responsibility. If the goal is "maintain the Android project," one successful build does not terminate the responsibility.
+
+Todd should periodically compact ongoing responsibilities into concise state summaries. The summary must preserve exact facts needed for resumption: repositories, branches, task IDs, remote job IDs, deadlines, failed approaches, permissions, and unresolved questions.
+
+The owner should be able to ask, "What are you working on?" Todd should answer from the task system, not generate a vague conversational summary. The answer should list active work, blocked work, scheduled work, and recently completed work.
+
+The owner should also be able to say, "Stop working on this but remember where we are." That should transition the responsibility or task to PAUSED while preserving state.
+
+"Forget this project" is a different operation and requires an explicit deletion flow because it affects memory.
+
+# 122. Proactive research and private notes
+
+Todd can review permitted sources before the owner asks a new question when proactive mode is enabled for a project or responsibility. The purpose is to stay informed, detect changes, and prepare useful context.
+
+Proactive research is read-oriented. It can inspect permitted sources and save private notes, but it must not automatically perform externally visible writes unless the action rules separately permit them.
+
+Private notes should store source, timestamp, relevance, and project. Notes may be short facts, changes detected, potential problems, or suggested actions.
+
+Todd should not notify the owner for every note. It should compare the finding against notification rules and project importance.
+
+For example, if a monitored dependency publishes a new version, Todd may record the release. It should notify only if the update affects the owner's project or if the user asked to be told about every release.
+
+Proactive research must be resistant to malicious content. A web page or email cannot redefine Todd's rules.
+
+# 123. Activity center in detail
+
+The Activity center is one of the most important trust surfaces.
+
+In Progress shows tasks that are actively executing or waiting for a near-term tool result.
+
+Scheduled shows future or recurring tasks, with next run time, recurrence, and last result.
+
+Blocked shows tasks waiting for owner approval, credentials, external conditions, missing data, failed verification requiring a decision, or unavailable services.
+
+Completed shows finished tasks with final evidence and completion time.
+
+Cancelled and Failed may be filterable states rather than top-level tabs.
+
+Each activity card should have a concise status sentence. Examples:
+"Running Android tests on commit 4f28…"
+"Waiting for GitHub Actions build-apk."
+"Needs approval to create a pull request."
+"Scheduled to check calendar tomorrow morning."
+"Completed: APK verified for commit 9ac1…"
+
+Opening an activity reveals the operational timeline and evidence.
+
+# 124. Rules editor
+
+The rules editor should allow natural-language creation but store structured policies.
+
+A rule contains:
+- scope;
+- trigger/action category;
+- tool or provider;
+- target constraints;
+- behavior;
+- optional expiration;
+- created-by owner;
+- human-readable explanation.
+
+Example:
+"For repository fateh1989/Todd, allow commits to feature branches without asking after unit tests pass, but always ask before pushing to main."
+
+Todd may help translate this into structured rules, then show the interpretation before saving.
+
+Conflicting rules should be detected. A more specific rule can override a general rule unless a built-in safety rule is stricter.
+
+The user should be able to disable a rule without deleting it.
+
+# 125. Approval experience
+
+Approval prompts should not be generic.
+
+Bad:
+"Todd wants permission. Allow?"
+
+Good:
+"Todd wants to push commit 6ab3… to fateh1989/Todd branch main. Unit tests and assembleDebug passed. This will update the remote repository. Approve?"
+
+For data sharing:
+"Todd needs to send these three code files and the Gradle error to the selected cloud model. No other project files will be sent."
+
+For screen vision:
+"Todd needs a screenshot of the current app because accessibility text does not contain the diagram you asked about."
+
+Approvals should include Allow once, Deny, and where appropriate "Always allow for this project/action" leading to the rules editor.
+
+# 126. Pause semantics
+
+Global Pause stops proactive research, new autonomous steps, scheduled actions configured to respect pause, and new remote jobs.
+
+It should not automatically destroy remote work. For an already-running remote job, Pause should request a safe pause if supported. If the provider cannot pause, Todd should either stop/cancel or leave the job running based on explicit project policy.
+
+Voice and interactive chat can remain available while paused if the owner chooses.
+
+Pause is reversible and keeps all state.
+
+The UI should clearly show PAUSED globally and for individual agents.
+
+# 127. Power Off semantics
+
+Power Off is explicit shutdown of Todd's active behavior.
+
+When activated:
+1. stop accepting new autonomous tasks;
+2. end microphone capture;
+3. end MediaProjection;
+4. remove or disable the active overlay after feedback;
+5. persist local state;
+6. stop/cancel local agent loops;
+7. request remote task cancellation according to policy;
+8. mark global state OFF;
+9. leave the main app available for restart.
+
+Power Off should not delete data or disconnect services.
+
+If a remote job cannot be cancelled immediately, Todd must show that cancellation was requested but not yet verified.
+
+# 128. Hide semantics
+
+Hide affects only presentation of the floating button.
+
+It must not imply Pause or Power Off.
+
+If Todd is running a task when hidden, the persistent notification or main app remains the status surface.
+
+The distinction among Hide, Pause, and Power Off should be taught once and remain consistent everywhere.
+
+# 129. Floating button polish
+
+The button should support edge docking, portrait/landscape repositioning, multi-window constraints, and display cutouts.
+
+Position should persist per orientation or be recalculated safely when display bounds change.
+
+The button should never be placed entirely outside visible bounds.
+
+During dragging, the Hide and Power Off targets animate in only after movement exceeds a threshold, preventing accidental target display on normal taps.
+
+Haptic feedback when entering a target improves confidence.
+
+The Power Off target should have a dwell animation.
+
+If Accessibility services are disabled, the floating button still opens Todd; only screen/action features requiring accessibility are disabled.
+
+# 130. Voice architecture details
+
+Voice is composed of four independent layers:
+1. capture;
+2. speech-to-text;
+3. Todd agent reasoning/tool use;
+4. text-to-speech.
+
+This separation lets Todd switch speech providers without changing agent logic.
+
+Capture should use Android audio APIs with foreground state when required.
+
+Speech-to-text must support streaming partial transcripts when provider/runtime supports it.
+
+The UI should distinguish partial transcription from final recognized text.
+
+The user should be able to correct a recognized command before executing a high-impact action.
+
+Text-to-speech should stream where practical so long answers begin promptly.
+
+Voice should have a "concise spoken mode" because spoken responses that are comfortable are usually shorter than written reports. Full details can remain visible on screen.
+
+If a coding task produces a long log, Todd should speak the summary, not read thousands of lines.
+
+# 131. Voice interruption and turn-taking
+
+Todd should detect user interruption during playback.
+
+When the microphone is active for barge-in, speech output should stop as soon as the user's new utterance is confidently detected.
+
+The new turn should preserve context.
+
+A user can say "stop talking but continue the task." This stops audio output, not execution.
+
+A user can say "stop everything." This should map to an appropriate global stop confirmation depending on the current risk.
+
+Voice commands should be interpreted conservatively for destructive actions. If recognition is uncertain, request confirmation.
+
+# 132. Wake behavior
+
+Todd does not require an always-listening wake word.
+
+A wake-word system may be added only if a reliable local implementation exists and the owner explicitly enables it.
+
+Default invocation is button, keyboard, notification, or explicit microphone session.
+
+This avoids continuous microphone use and battery drain.
+
+# 133. Screen understanding pipeline
+
+The screen pipeline should first capture app/window identity and accessibility tree.
+
+A sanitizer removes irrelevant repeated nodes and masks fields identified as passwords or sensitive input when possible.
+
+A context extractor identifies likely title, primary content, selected/focused control, error messages, buttons, and text fields.
+
+If the user question cannot be answered semantically, Todd can request visual capture.
+
+For vision, a screenshot can be resized or cropped to relevant bounds before cloud transmission.
+
+The screen context object should be timestamped because UI changes quickly.
+
+Before acting on a stale context, refresh it.
+
+# 134. Accessibility actions
+
+Accessibility actions can include click, scroll, focus, set text, and navigate back when Android exposes them.
+
+These are powerful and require a dedicated "Screen Control" permission mode separate from "Screen Read."
+
+Todd should prefer semantic element actions over coordinate taps.
+
+Coordinate-based interaction is fragile. Use it only with strong visual grounding and explicit permission.
+
+After each action, observe the resulting UI to verify it had the expected effect.
+
+# 135. Keyboard visual specification
+
+Todd's keyboard should prioritize accurate typing on a touch screen.
+
+Use large touch targets, sensible row spacing, and a centered spacebar.
+
+Arabic keyboard must include all expected letters and common punctuation.
+
+English layout follows familiar QWERTY behavior.
+
+The top strip has customizable shortcuts and access to the full tools drawer.
+
+The Todd key should be visually identifiable but not reduce essential typing keys excessively.
+
+The feature drawer should support search if capabilities become numerous.
+
+The keyboard must include Enter, backspace, shift/language switching, numbers/symbols, emoji access if implemented, clipboard entry, and settings.
+
+# 136. Keyboard AI action lifecycle
+
+An action starts from one of:
+- selected text;
+- current field context;
+- clipboard content explicitly chosen;
+- screen context explicitly included;
+- manual prompt.
+
+Todd shows what input it will use when privacy-sensitive.
+
+The action is routed local/cloud based on policy.
+
+The result appears in a preview card.
+
+The user chooses Insert, Replace selection, Copy, Save to project, or Cancel.
+
+For Reply, the result should not be sent automatically unless a specific rule allows it and the target app integration is reliable.
+
+# 137. Keyboard failure behavior
+
+If AI is unavailable, show a small actionable error without breaking typing.
+
+If selected text is inaccessible, ask the user to select/copy or use screen context.
+
+If the target app rejects text insertion, keep result available to copy.
+
+If Todd is OFF, normal keyboard remains usable and the Todd key can offer "Turn on Todd."
+
+# 138. Memory confidence and provenance
+
+Every important memory fact should know where it came from.
+
+A "last verified commit" sourced from GitHub has high authority.
+
+A user statement has high authority for preferences and intended requirements.
+
+A model inference has lower authority.
+
+A summary derived from old state is stale if newer tool evidence exists.
+
+Todd should rank memories using authority plus recency.
+
+Conflicting facts should not be merged into one false certainty.
+
+# 139. Memory correction workflow
+
+When the owner says "No, that is wrong; the branch is main," Todd should:
+1. identify the affected memory;
+2. update the structured branch field;
+3. mark older conflicting memory deprecated;
+4. apply the correction to current task planning;
+5. record the correction in activity.
+
+Do not merely apologize while leaving stale state unchanged.
+
+# 140. Memory deletion and project reset
+
+The owner can clear a project's Todd memory without deleting the external repository.
+
+Before deletion, explain what local state will be removed.
+
+Deletion should remove project summaries, task history if selected, memories, cached context, and local references according to scope.
+
+Connected-source data derived into memory should be included in the deletion scope.
+
+A full Todd reset is separate and should require explicit confirmation.
+
+# 141. Remote job scheduler
+
+Remote execution needs a job scheduler independent of any one AI vendor.
+
+The scheduler receives a RemoteJobRequest with project, repository, branch, start commit, goal, environment, tool permissions, budget, and completion criteria.
+
+It selects an executor adapter.
+
+It persists external job ID.
+
+It receives/polls status.
+
+It maps provider-specific statuses into Todd statuses.
+
+It handles cancellation, timeout, and reconnect.
+
+If an executor disappears, Todd marks the task BLOCKED rather than inventing progress.
+
+# 142. Coding loop evidence
+
+Every coding iteration should produce an IterationRecord:
+- starting commit/tree;
+- hypothesis;
+- files changed;
+- commands run;
+- test results;
+- observed failure or success;
+- next decision.
+
+The owner does not need to read every record by default, but they must exist for reliable continuation.
+
+When a task resumes after interruption, read the latest IterationRecord before editing.
+
+# 143. Repository locking
+
+Todd should implement a logical lock per repository branch for write tasks.
+
+If another Todd task wants to modify the same branch, it should wait, create a separate branch, or ask the owner.
+
+Read-only research can run concurrently.
+
+Locks must survive process restart through persisted task state.
+
+Stale locks need reconciliation with actual remote jobs.
+
+# 144. GitHub authorization scopes
+
+Start read-only if the user only asks to inspect repositories.
+
+Add contents write permission when code editing is requested.
+
+Actions read is needed to inspect workflow runs/logs.
+
+Pull request permissions are needed only when creating/managing PRs.
+
+Avoid requesting organization-wide administrative scopes.
+
+Show the user what scope is being requested and why.
+
+# 145. GitHub branch discipline
+
+Before modifying a branch, fetch its current head.
+
+Do not rely on a cached SHA.
+
+If branch head changed since the task started, reconcile before push.
+
+Never force push by default.
+
+For main/protected branches, default to feature branch + PR unless project policy explicitly permits direct commits.
+
+# 146. Artifact discipline
+
+Todd should maintain artifact metadata separately from conversational messages.
+
+An artifact record has type, filename, source task, provider/run ID, commit SHA, checksum, size, created time, and local/remote location.
+
+Before presenting an APK as "the new version," verify the artifact's commit matches the intended task.
+
+If an artifact expired remotely, Todd should say it is unavailable rather than provide a dead link.
+
+# 147. Research freshness policy
+
+Research tasks should carry a freshness requirement:
+- static/evergreen;
+- current as of today;
+- last week/month;
+- exact version/date.
+
+Todd should search accordingly.
+
+Software APIs and model availability are time-sensitive.
+
+The agent should not answer current-provider questions purely from old memory.
+
+# 148. Source hierarchy
+
+Preferred order:
+1. direct system/tool result;
+2. official primary documentation;
+3. official repository/release;
+4. reputable secondary technical source;
+5. community discussion for experiences/opinions.
+
+Community reports are useful for real-world behavior but should not override official API facts without evidence.
+
+# 149. Research output discipline
+
+Todd should summarize sources rather than paste large copyrighted text.
+
+Quotes, when needed, should be short and attributed.
+
+For project decisions, save the conclusion plus source links and date.
+
+If evidence is insufficient, state "not verified."
+
+# 150. AI model selection metadata
+
+Each configured model should have metadata:
+- provider;
+- model identifier;
+- input types;
+- output types;
+- tool support;
+- vision;
+- voice;
+- maximum context;
+- relative quality;
+- relative latency;
+- cost;
+- privacy mode;
+- last verified availability.
+
+Do not hard-code marketing names throughout the product.
+
+Model aliases such as FAST, BALANCED, STRONG can map to current models.
+
+# 151. Local model download manager
+
+If Todd supports downloadable local models, provide:
+- model name;
+- size;
+- storage required;
+- quantization;
+- compatible devices;
+- download progress;
+- checksum verification;
+- delete option;
+- SD-card/storage strategy where Android permits.
+
+Do not start multi-gigabyte downloads silently.
+
+# 152. Local model capability test
+
+After model installation, run a small self-test.
+
+Verify model loads, produces output, and can be cancelled.
+
+Record approximate tokens/second and memory use if available.
+
+If the device becomes unstable, allow user to choose a smaller model.
+
+# 153. Provider setup wizard
+
+For each cloud provider:
+1. explain purpose;
+2. connect/authenticate;
+3. validate credentials;
+4. fetch model list if possible;
+5. make a small test call;
+6. record verified status;
+7. configure cost limit.
+
+A provider is not "connected" merely because a key was saved.
+
+# 154. Provider privacy controls
+
+Project settings can restrict providers.
+
+Example: private project may allow only local model and one paid provider.
+
+A screen-capture action may have a stricter provider list than text.
+
+Provider selection UI must respect data-location rules.
+
+# 155. Cost prediction
+
+Before a very large cloud task, Todd can estimate cost class: negligible, low, moderate, high.
+
+Exact prediction is not always possible, so label estimates.
+
+For long jobs, track cumulative cost when provider metadata allows.
+
+If spend accelerates unexpectedly, pause at a configured threshold.
+
+# 156. Cloud-computer security
+
+Remote workspaces should use least privilege.
+
+Repository credentials should be scoped.
+
+Network access can be restricted when provider supports it.
+
+Destroy temporary environments after task completion according to retention policy.
+
+Do not leave secrets in shell history or generated files.
+
+# 157. Remote environment reproducibility
+
+For coding, capture environment facts: OS image, Java version, Android SDK, Gradle version, relevant package versions.
+
+When a build succeeds remotely, save enough environment metadata to reproduce it.
+
+If local/user device build differs, Todd can compare environments.
+
+# 158. Remote task timeout policy
+
+Long-running does not mean infinite.
+
+Each job has soft and hard timeout.
+
+At soft timeout, Todd evaluates whether progress is meaningful.
+
+At hard timeout, stop or ask owner based on policy.
+
+Retries should not reset budget indefinitely.
+
+# 159. Stuck-loop detection
+
+Todd should detect repeated identical errors.
+
+If three iterations produce the same error and no technical factor changed, mark task BLOCKED and request a new strategy or stronger model.
+
+This prevents wasting hours and cost.
+
+# 160. Model escalation in coding
+
+A coding task may start with an economical model for repository inspection.
+
+If the model repeatedly fails after evidence-based attempts, escalate to a stronger model if allowed.
+
+Escalation should carry the full structured failure record so the stronger model does not repeat old attempts.
+
+# 161. Testing strategy for Todd itself
+
+Todd requires multiple test layers.
+
+Unit tests:
+state machine, routing, rules, memory repositories, schedulers.
+
+Android instrumentation:
+Room persistence, overlay state where testable, keyboard service integration, permission state handling.
+
+Integration tests:
+provider adapters, GitHub adapter using test repo/mock, remote executor.
+
+End-to-end:
+open Todd, create project, invoke overlay, use keyboard, start voice, screen context, GitHub task, remote job reconnect.
+
+Security tests:
+secret scanning, permission denial, prompt injection, destructive-action approval.
+
+# 162. CI for Todd
+
+GitHub Actions should at minimum:
+- checkout;
+- configure JDK;
+- configure Android SDK;
+- run unit tests;
+- lint;
+- assembleDebug;
+- upload APK artifact.
+
+Later add instrumentation in emulator where practical.
+
+Workflow should be pinned/maintained to avoid supply-chain drift where possible.
+
+The PROJECT_STATE file should record which commit passed which workflow.
+
+# 163. Release channels
+
+Todd may use Debug, Internal, and Stable variants.
+
+Debug can expose diagnostics.
+
+Stable should minimize logs and disable developer-only controls.
+
+Version names and codes must increment predictably.
+
+# 164. Upgrade verification
+
+Before installing a new Todd build over an existing one:
+- verify signature compatibility;
+- verify database migrations;
+- back up critical state if needed;
+- install;
+- verify launch;
+- verify memory;
+- verify keyboard service remains enabled/available where Android permits;
+- verify overlay settings;
+- verify provider connections.
+
+A successful APK build is not an upgrade verification.
+
+# 165. Performance budget
+
+Todd's idle presence should use minimal CPU.
+
+Overlay should not trigger continuous redraw.
+
+Accessibility event processing should be filtered and debounced.
+
+Local AI should load on demand or use managed caching.
+
+Database operations should not block UI.
+
+Large logs and screenshots need retention limits.
+
+# 166. Battery behavior
+
+Todd should show which features consume power.
+
+Continuous voice and screen capture are expensive and explicit.
+
+Background checks should use reasonable cadence.
+
+Remote execution is preferred for long heavy work.
+
+A Battery Saver mode can reduce proactive work and local inference.
+
+# 167. Storage behavior
+
+Show storage consumed by:
+- local models;
+- screenshots/cache;
+- voice cache;
+- project memory;
+- logs;
+- artifacts.
+
+Allow clearing caches separately from deleting project memory.
+
+Large local models should be removable.
+
+# 168. Network behavior
+
+Support Wi-Fi-only options for large model downloads and artifact downloads.
+
+Cloud AI requests can run on mobile data if user allows.
+
+Remote coding logs should be streamed efficiently, not repeatedly downloaded in full.
+
+# 169. Error UX
+
+Errors should state:
+what failed;
+whether the task is safe;
+whether work was preserved;
+what Todd will try next;
+what the owner can do.
+
+Avoid raw stack traces in primary UI.
+
+Provide "Details" for technical information.
+
+# 170. Permission denial UX
+
+If the user denies a permission, Todd should degrade gracefully.
+
+Overlay denied: use app/notification/keyboard.
+Mic denied: text still works.
+Accessibility denied: visual capture may still work when explicitly permitted.
+MediaProjection denied: semantic screen context can still work.
+GitHub denied: local project notes still work.
+Cloud disabled: local mode remains.
+
+Never nag repeatedly.
+
+# 171. Multi-device future
+
+Todd is Android-first, but the domain model should allow another client later.
+
+A future desktop client could view the same remote tasks and project state.
+
+However, do not make cloud synchronization mandatory just to prepare for multi-device support.
+
+# 172. Messaging-channel future
+
+A future messaging channel could allow the owner to message Todd through another platform.
+
+Only authenticated owner messages can direct Todd.
+
+Messages from other participants are content, not commands.
+
+Channel integration must preserve the same permission and task system.
+
+# 173. Personalization without fragility
+
+Todd can learn preferred formats and workflows, but core operation should not depend on opaque personalization.
+
+Important preferences are explicit settings/memory entries.
+
+If personalization data is lost, project facts and task state remain intact.
+
+# 174. Todd's communication style
+
+Todd should begin with the result or current state.
+
+Use concise progress updates during long work.
+
+Do not repeat information the owner already knows.
+
+When blocked, state the exact blocker.
+
+When verified, state what evidence proved it.
+
+When not verified, use that phrase.
+
+# 175. Long-task communication
+
+During long work, Todd should not flood notifications.
+
+Inside the task view, it can update frequently.
+
+Outside it, notify at meaningful milestones or when owner action is needed.
+
+If the user opens Todd, show the freshest progress immediately.
+
+# 176. User interruption
+
+The owner can interrupt any conversation or task with a new instruction.
+
+Todd should incorporate the new instruction without losing current state.
+
+If the new instruction conflicts with an active operation, stop safely, update task state, and follow the newer instruction.
+
+# 177. Goal changes
+
+When the user changes the goal, Todd should not keep optimizing for the old goal.
+
+Update completion criteria.
+
+Mark old plan superseded.
+
+Preserve history for audit.
+
+# 178. No needless clarification rule
+
+If required information already exists in verified project state, memory, screen context, or connected sources, retrieve it instead of asking again.
+
+Ask only when missing information materially affects correctness or permission.
+
+This keeps Todd feeling persistent.
+
+# 179. Exact-state retrieval rule
+
+Before a consequential operation, refresh authoritative state.
+
+For GitHub: branch/commit.
+For schedule: current task configuration.
+For screen: current UI.
+For file: current version/hash where relevant.
+For provider: connection status if stale.
+
+This prevents acting on old memory.
+
+# 180. Final expanded acceptance statement
+
+The intended Todd is a single coherent product. The owner should be able to pick up the phone, see a small floating Todd control, speak or type a request, include the current screen when desired, and rely on Todd to know which project is active and what happened previously. Todd should use the keyboard as a native interaction point, not as a separate toy. It should remember state after restarts. It should be able to schedule work and perform proactive read-only checks. It should expose clear controls for what it can read, change, share, and execute.
+
+When a task becomes complex, Todd should use the appropriate intelligence provider without locking the application to a temporary pricing plan. When the work becomes long-running, Todd should hand execution to a remote workspace, persist the job identity, and let the phone disconnect. When the owner returns, Todd should reconnect and show concrete evidence of progress. For coding, the system should know the exact repository and branch, inspect before editing, test after changes, record failures, avoid repeated failed approaches, and only claim success after relevant verification.
+
+Todd must remain controllable. Hide means hide the floating UI. Pause means stop autonomous progress while preserving state. Power Off means stop the agent safely. Screen capture and microphone sessions are explicit and visible. Tools have independent permissions. High-impact actions require approval. Secrets never belong in source code.
+
+The quality target is not merely feature count. The target is continuity plus trustworthy execution. Every feature in this specification exists to support that: memory prevents repeated explanation; projects organize state; tasks organize work; activity makes progress visible; rules preserve control; local AI preserves privacy and cost; cloud AI supplies strength; remote execution supplies endurance; GitHub supplies durable software history; voice and keyboard make Todd available everywhere; screen context connects Todd to what the owner is actually seeing; verification prevents false claims.
+
+All future implementation work must preserve this full product direction.
