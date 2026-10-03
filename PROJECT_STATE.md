@@ -3,13 +3,15 @@
 Last updated: 2026-10-03
 
 ## Current goal
-Prepare the canonical GitHub specification so Google AI Studio can build Todd incrementally as a native Android personal hybrid AI agent.
+Use the complete canonical Todd specification to drive implementation in Google AI Studio without redefining the product in later prompts.
 
 ## Repository
 - Repository: `fateh1989/Todd`
 - Default branch: `main`
 
 ## Confirmed
+- `TODD_MASTER_SPEC.md` is the canonical binding product specification.
+- Verified master specification size: 16,050 words and 109,172 characters on `main`.
 - Repository exists and was empty before project initialization.
 - `README.md` created and verified on `main`.
 - `GOOGLE_AI_STUDIO_BUILD_PROMPT.md` created and verified on `main`.
@@ -38,4 +40,4 @@ Prepare the canonical GitHub specification so Google AI Studio can build Todd in
 None recorded for Todd yet.
 
 ## Next step
-Give Google AI Studio the repository and instruct it to read `README.md` and `GOOGLE_AI_STUDIO_BUILD_PROMPT.md`, then implement **Milestone 1 only** and return build/test evidence before continuing.
+Give Google AI Studio the repository and instruct it to read `TODD_MASTER_SPEC.md` first, then `PROJECT_STATE.md` and `README.md`. The full product scope is already defined; implementation may be sequenced for verification, but no later feature should be treated as optional or unknown.
