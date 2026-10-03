@@ -1,5 +1,7 @@
 # Todd — Personal Hybrid AI Agent
 
+> **Canonical specification:** Read [TODD_MASTER_SPEC.md](./TODD_MASTER_SPEC.md) before any implementation. It is the binding full product definition. README is only a short introduction.
+
 Todd is a private Android-first personal AI agent inspired by the idea of an always-available assistant. It is designed for one owner only and must be **local-first, provider-agnostic, verifiable, and resumable**.
 
 ## Product goal
