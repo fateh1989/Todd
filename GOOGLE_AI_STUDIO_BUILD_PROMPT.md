@@ -1,167 +1,381 @@
-# Google AI Studio Build Brief — Todd
+# Google AI Studio — Product Brief for Todd
 
-Read `README.md` first. It is the product source of truth.
+Read `README.md` and `PROJECT_STATE.md` first. This file defines the intended product experience.
 
-## Your task
+## Product vision
 
-Build Todd as a native Android application for one private owner.
+Build **Todd** as a private, always-available personal AI companion for Android. It is not a chat app with a few AI buttons. It should feel like a persistent intelligent assistant that lives with the user across apps, remembers ongoing work, understands context when permission is granted, speaks naturally, and can continue multi-step tasks over time.
 
-Use:
-- Kotlin
-- Jetpack Compose
-- AndroidX
-- Room for persistent project/memory state
-- Android Keystore-backed secure storage for secrets
-- InputMethodService for the Todd keyboard
-- AccessibilityService for semantic screen context where permission is granted
-- MediaProjection only for explicit visual screen capture sessions
-- a provider abstraction for AI so Todd is not locked to Gemini or any vendor
+Todd is designed for **one owner only**. It should be deeply personal, simple to invoke, easy to stop, privacy-conscious, and able to grow into a long-running software agent.
 
-Do not turn Todd into a web-only app.
-Do not make Firebase the canonical memory store.
-Do not hard-code API keys or GitHub tokens.
-Do not couple core business logic to a specific AI model.
+The experience should feel continuous:
+- the user should not have to re-explain a project every time;
+- Todd should know the last verified state of each project;
+- it should distinguish between planning, executing, verifying, failing, and finishing;
+- it should be able to resume a task after the app is closed or reopened;
+- it should return to the user when it has a verified result, needs permission, or reaches a blocker.
 
-## Architectural modules
+## Main interaction model
 
-Create clear boundaries for:
+Todd should be available through three primary surfaces:
 
-1. `app`
-   - Compose UI
-   - navigation
-   - settings
-   - permission status
+### 1. Floating Todd button
+A small elegant floating circular button above other apps, when overlay permission is granted.
 
-2. `core-agent`
-   - agent state machine
-   - Plan / Execute / Verify / Record
-   - task state and evidence
+Behavior:
+- tap: open the compact Todd assistant;
+- drag: move it anywhere on screen;
+- while dragging, show two large targets at the bottom:
+  - **Hide** — hide the floating button only;
+  - **Power Off** — stop Todd from starting new work and safely stop the active agent loop;
+- require a short hold over Power Off before shutdown to prevent accidental stopping;
+- allow restoration from the app, persistent notification, or Todd keyboard;
+- visibly represent state: idle, listening, thinking, working, local-only, cloud-active, paused, error.
 
-3. `core-memory`
-   - Room entities/DAO/repository
-   - projects
-   - verified state
-   - failures
-   - next action
+The floating control should be minimal, polished, and non-intrusive.
 
-4. `core-ai`
-   - `AIProvider` interface
-   - local/cloud routing
-   - mock provider for tests
-   - no vendor-specific logic in agent core
+### 2. Todd keyboard
+Implement a real Android keyboard using `InputMethodService`.
 
-5. `feature-overlay`
-   - floating Todd button
-   - drag handling
-   - Hide target
-   - Power Off target
-   - state indicator
+The keyboard must remain fully usable as a normal keyboard first, then add Todd intelligence on top.
 
-6. `feature-keyboard`
-   - InputMethodService
-   - normal keyboard use
-   - Todd action
-   - selected/current-field text handling
-   - insert/replace generated result
+Core actions:
+- correct;
+- rewrite;
+- translate;
+- summarize;
+- explain;
+- reply;
+- continue writing;
+- send selected/current text to Todd;
+- insert or replace generated text back into the active field.
 
-7. `feature-screen`
-   - Accessibility service
-   - MediaProjection session controller
-   - visible permission/activity indicators
+Todd should be callable directly from the keyboard without opening the main app.
 
-8. `feature-github`
-   - interface first
-   - read-only implementation first
-   - no embedded token
+### 3. Voice conversation
+Todd must support natural two-way voice interaction.
 
-9. `feature-remote-agent`
-   - interface/stub only in MVP
-   - later handles long-running coding outside the phone
+The user should be able to:
+- press a microphone button and speak;
+- start a continuous voice conversation session;
+- interrupt Todd while it is speaking;
+- hear Todd reply naturally;
+- switch between Arabic and English;
+- choose or change the voice later.
 
-## First implementation target
+Voice should be optional. Todd must not continuously listen unless the user explicitly activates a voice session.
 
-Do NOT attempt the entire final product in one generation.
+## Screen awareness
 
-Build Milestone 1 only:
+Todd may understand the current screen only with explicit permission.
 
-- Android app launches.
-- Home screen shows Todd status.
-- Floating button can be enabled.
-- Floating button can be dragged.
-- While dragging, two targets appear at the bottom:
-  - Hide
-  - Power Off
-- Dropping on Hide removes the floating button but does not erase state.
-- Dropping on Power Off sets Todd to disabled and stops starting new agent work.
-- A notification or app screen can restore Todd.
-- Room database persists a basic `ToddState` across app restarts.
-- Add a minimal `AIProvider` interface plus a deterministic MockAIProvider.
-- Add unit tests for state transitions.
-- Add an Android build workflow in GitHub Actions.
+Use two complementary mechanisms:
 
-## Required state model
+### Semantic screen context
+Use `AccessibilityService` to read accessible UI text, controls, labels, and structure where Android allows it.
 
-At minimum:
+### Visual screen context
+Use `MediaProjection` only when actual visual understanding is needed and after explicit user consent for the session.
 
-```text
-ToddRunMode:
-  OFF
-  PAUSED
-  LOCAL_ONLY
-  AUTO
-  CLOUD_ACTIVE
+Todd must:
+- visibly indicate when screen access is active;
+- never claim it can see protected or unavailable content;
+- prefer semantic UI context over screenshots when sufficient;
+- avoid sending full screen content to cloud unless required for the active task.
 
-TaskState:
-  PLANNED
-  IN_PROGRESS
-  EXECUTED
-  VERIFIED
-  FAILED
-  BLOCKED
+Example experience:
+The user opens WhatsApp, a browser, GitHub, or another app, invokes Todd, and asks:
+- “Explain what is on this screen.”
+- “Reply to this.”
+- “Translate this.”
+- “What should I do next?”
+Todd uses only the context that Android and the user allow.
+
+## Persistent personal memory
+
+Todd must remember ongoing work across sessions.
+
+The canonical memory should be local-first and stored on-device using Room.
+
+For every project, persist:
+- project name;
+- purpose;
+- current goal;
+- repository;
+- current branch;
+- last verified commit;
+- last executed change;
+- last successful test/build;
+- known failures;
+- approaches that failed previously;
+- known reason for each failure;
+- next action;
+- concise project summary;
+- user-specific rules;
+- tool permissions.
+
+Todd must retrieve only the relevant memory for the current task instead of loading the entire history every time.
+
+## Project agents
+
+Todd should support multiple persistent project agents inside one app.
+
+Examples:
+- coding project agent;
+- research agent;
+- GitHub monitoring agent;
+- writing agent;
+- personal task agent.
+
+Each project agent has its own:
+- memory;
+- state;
+- tools;
+- permissions;
+- current task;
+- execution history.
+
+They all share the same Todd interface.
+
+## Agent behavior
+
+Todd must behave like an execution agent, not a text completion bot.
+
+Use this state loop:
+
+```
+PLAN
+→ EXECUTE
+→ VERIFY
+→ RECORD
+→ CONTINUE / STOP / ASK
 ```
 
-Never map EXECUTED to VERIFIED automatically.
+Required task states:
+- PLANNED
+- IN_PROGRESS
+- EXECUTED
+- VERIFIED
+- FAILED
+- BLOCKED
 
-## Verification gates
+Rules:
+- EXECUTED is never automatically VERIFIED.
+- Never claim “fixed”, “built”, “uploaded”, “working”, or “complete” without a real tool result or test.
+- After a meaningful change, verify before continuing.
+- If an approach failed, record it and do not retry the same approach unless a specific technical factor changed.
+- Preserve working parts.
+- Prefer the smallest verified change over broad rewrites.
+- When two sources or results conflict, record the conflict instead of choosing the convenient answer.
+
+## Long-running software work
+
+Todd should be able to manage coding work that lasts for hours, but the Android phone should not be the machine that must stay awake and compile continuously.
+
+Phone responsibilities:
+- issue commands;
+- show progress;
+- hold personal state;
+- grant permissions;
+- display logs and evidence;
+- reconnect to a long-running job.
+
+Remote execution responsibilities:
+- clone or checkout the selected repository;
+- inspect the current branch and commit;
+- modify files;
+- run tests/builds;
+- inspect failures;
+- apply a targeted fix;
+- rerun verification;
+- create commits for verified steps;
+- return structured evidence to Todd.
+
+The remote execution layer must be an interface, not tied permanently to one vendor.
+
+## GitHub integration
+
+Todd should connect to GitHub through secure authorization with minimum required permissions.
+
+Capabilities should be added progressively:
+- read repository;
+- read branches and commits;
+- read checks/workflows;
+- inspect logs;
+- create/update files;
+- create commits;
+- create branches and pull requests later.
+
+Sensitive operations such as delete, force-push, merge, repository removal, or destructive actions must require explicit approval.
+
+Never hard-code GitHub tokens in the APK.
+
+## Hybrid AI design
+
+Todd must be **local-first and provider-agnostic**.
+
+Create one common `AIProvider` interface.
+
+Potential providers:
+- local Android model;
+- Gemini;
+- OpenAI;
+- other providers added later.
+
+Routing modes:
+- **Local Only**
+- **Auto**
+- **Cloud Preferred**
+
+Automatic routing concept:
+- simple/private/low-cost request → local model;
+- complex coding/large-context/reasoning request → cloud model;
+- user can override the route at any time.
+
+The product must never depend on a free cloud tier for survival. If one provider changes pricing or disappears, Todd should continue working and another provider should be swappable in.
+
+## Privacy
+
+Todd is for one owner and should minimize unnecessary data movement.
+
+Requirements:
+- primary memory stays local;
+- secrets use Android Keystore-backed secure storage;
+- no API key or token is committed to Git or embedded directly in source;
+- cloud providers receive only the minimum context needed;
+- each tool/provider has a separate permission toggle;
+- the user can disable screen access, cloud AI, microphone, GitHub, or the entire agent independently.
+
+## Main app
+
+The main app should be simple and polished, with Arabic RTL support from the beginning.
+
+Recommended home screen:
+- Todd status;
+- current active project;
+- current task;
+- last verified action;
+- floating button toggle;
+- voice button;
+- Local / Auto / Cloud mode;
+- permissions summary;
+- recent activity;
+- projects;
+- settings.
+
+Avoid developer-looking clutter in the user interface.
+
+## Shutdown and control
+
+Todd must always be easy to stop.
+
+Controls:
+- drag floating button to **Hide**;
+- drag floating button to **Power Off**;
+- pause Todd;
+- switch to Local Only;
+- disable screen awareness;
+- disable voice;
+- disable cloud access;
+- stop one project agent without stopping the entire app;
+- Android system permissions remain the final authority.
+
+Power Off should stop new agent work safely, persist current state, and clearly show that Todd is off.
+
+## Technical baseline
+
+Use:
+- Kotlin;
+- Jetpack Compose;
+- AndroidX;
+- Room;
+- Android Keystore-backed secure storage;
+- InputMethodService;
+- AccessibilityService;
+- MediaProjection;
+- WorkManager where appropriate for resumable local coordination;
+- interfaces around remote/cloud services.
+
+Do not build Todd as a web wrapper.
+Do not make Firebase the canonical source of personal memory.
+Do not tie core logic to Gemini or any one AI vendor.
+
+## Build strategy
+
+Do not try to generate the entire final product in one pass.
+
+### Milestone 1 — Foundation
+Build and verify:
+- native Android project;
+- main Todd screen;
+- draggable floating button;
+- Hide target;
+- Power Off target;
+- persistent Todd state using Room;
+- `AIProvider` interface;
+- deterministic mock AI provider;
+- state-machine unit tests;
+- GitHub Actions Android build workflow.
+
+### Milestone 2 — Keyboard and local intelligence
+- real Android IME;
+- normal typing;
+- Todd actions;
+- local AI runtime/provider;
+- text insertion/replacement.
+
+### Milestone 3 — Voice and screen awareness
+- microphone input;
+- spoken replies;
+- continuous voice session;
+- Accessibility context;
+- MediaProjection visual session;
+- clear privacy indicators.
+
+### Milestone 4 — GitHub
+- secure authorization;
+- repository read;
+- commits/branches/checks;
+- project-state linking.
+
+### Milestone 5 — Cloud AI
+- one real cloud provider;
+- routing;
+- usage controls;
+- replaceable provider architecture.
+
+### Milestone 6 — Long-running coding agent
+- remote execution interface;
+- repository checkout;
+- edit/build/test loop;
+- progress;
+- reconnect/resume;
+- verified commits.
+
+## Milestone 1 verification gates
 
 Before claiming Milestone 1 complete:
+1. run unit tests;
+2. run Gradle `assembleDebug`;
+3. confirm the APK task completes;
+4. verify Hide and Power Off produce different persisted states;
+5. verify state survives app restart;
+6. scan tracked source for API keys/tokens;
+7. record exact commands and results in `PROJECT_STATE.md`.
 
-1. Run unit tests.
-2. Run Gradle assembleDebug.
-3. Confirm APK task completes.
-4. Confirm state transition tests cover Hide vs Power Off behavior.
-5. Confirm no API key/token exists in tracked source.
-6. Record exact command/result in `PROJECT_STATE.md`.
+If any gate fails, record the failure and fix only the verified cause before continuing.
 
-If a gate fails:
-- record failure;
-- fix only the verified cause;
-- re-run the failed gate;
-- do not claim success until it passes.
+## Expected feel
 
-## Coding rules
+Todd should feel like a personal intelligent presence on the phone:
+- always reachable but never intrusive;
+- remembers what matters;
+- speaks naturally;
+- understands the current context when allowed;
+- continues real work instead of only discussing it;
+- can work locally or use a stronger cloud brain;
+- can manage long-running coding work;
+- can be stopped instantly;
+- never pretends success without evidence.
 
-- Preserve working code.
-- Small, reviewable changes.
-- Do not redesign architecture unless a proven technical blocker requires it.
-- Do not silently replace native Android with a web wrapper.
-- Do not add a cloud dependency just to make the demo easier.
-- Every permission must have a clear user-facing explanation.
-- Keep Arabic UI compatibility in mind from the beginning, including RTL.
-
-## After Milestone 1
-
-Stop and report:
-- commit(s);
-- tests run;
-- build result;
-- known limitations;
-- next proposed milestone.
-
-Milestone 2 will add the real keyboard service and local AI routing.
-Milestone 3 will add screen awareness.
-Milestone 4 will add GitHub read access.
-Milestone 5 will add a real cloud AI provider.
-Milestone 6 will add long-running remote coding.
-
-Do not skip directly to later milestones.
+Build the product around this behavior, not around a chat screen.
