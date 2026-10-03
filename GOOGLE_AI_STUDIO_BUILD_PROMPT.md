@@ -302,7 +302,9 @@ Do not tie core logic to Gemini or any one AI vendor.
 
 ## Build strategy
 
-Do not try to generate the entire final product in one pass.
+The **entire product specification in this document is binding from the first day**. Do not treat later capabilities as optional, future ideas, or undefined scope. Todd must be architected from the beginning to support the complete product described above.
+
+Implementation may be divided into verified steps only to reduce breakage and make testing reliable. These steps are an execution order, **not a staged definition of the product**. Do not simplify the architecture in an early step in a way that blocks keyboard, voice, screen awareness, hybrid AI, GitHub, persistent agents, or long-running coding later.
 
 ### Milestone 1 — Foundation
 Build and verify:
