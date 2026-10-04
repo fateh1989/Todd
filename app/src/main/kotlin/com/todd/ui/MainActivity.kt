@@ -40,6 +40,7 @@ import com.todd.service.overlay.FloatingToddService
 import com.todd.service.accessibility.ToddAccessibilityService
 import com.todd.service.screen.ScreenCaptureService
 import com.todd.service.screen.ScreenCaptureStore
+import com.todd.service.context.DeviceContextProvider
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -69,6 +70,9 @@ class MainActivity : ComponentActivity() {
                 onStartOverlay = { checkOverlayPermissionAndStart() },
                 onOpenAccessibility = {
                     startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                },
+                onOpenNotificationAccess = {
+                    startActivity(Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS))
                 },
                 onStartVoice = { requestOrStartVoice() },
                 onStopVoice = { stopVoiceSession() },
@@ -138,6 +142,7 @@ class MainActivity : ComponentActivity() {
 fun ToddMainScreen(
     onStartOverlay: () -> Unit,
     onOpenAccessibility: () -> Unit,
+    onOpenNotificationAccess: () -> Unit,
     onStartVoice: () -> Unit,
     onStopVoice: () -> Unit,
     onStartVisualScreen: () -> Unit,
@@ -297,7 +302,7 @@ fun ToddMainScreen(
                                     com.todd.core.ai.AIRequest(
                                         prompt = message,
                                         projectContext = contextBeforeMessage,
-                                        screenContext = ToddAccessibilityService.latestScreenContext().ifBlank { null },
+                                        screenContext = DeviceContextProvider.currentTextContext().ifBlank { null },
                                         screenImagePath = ScreenCaptureStore.latestFile()?.absolutePath
                                     ),
                                     state.aiMode
@@ -406,6 +411,7 @@ fun ToddMainScreen(
                     onClearGitHubToken = { app.githubCredentialStore.clearToken() },
                     onAIModeChange = { mode -> stateMachine.setAIMode(mode) },
                     onOpenAccessibility = onOpenAccessibility,
+                    onOpenNotificationAccess = onOpenNotificationAccess,
                     onStartVisualScreen = onStartVisualScreen,
                     onStopVisualScreen = onStopVisualScreen
                 )
@@ -725,6 +731,7 @@ fun SettingsView(
     onClearGitHubToken: () -> Unit,
     onAIModeChange: (AIProviderMode) -> Unit,
     onOpenAccessibility: () -> Unit,
+    onOpenNotificationAccess: () -> Unit,
     onStartVisualScreen: () -> Unit,
     onStopVisualScreen: () -> Unit
 ) {
@@ -765,6 +772,13 @@ fun SettingsView(
             Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(6.dp))
             Text("فتح إعدادات فهم الشاشة")
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedButton(onClick = onOpenNotificationAccess) {
+            Icon(Icons.Default.Notifications, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("فتح وصول الإشعارات")
         }
 
         Spacer(modifier = Modifier.height(12.dp))

@@ -9,6 +9,7 @@ import com.todd.ToddApplication
 import com.todd.core.ai.AIRequest
 import com.todd.service.accessibility.ToddAccessibilityService
 import com.todd.service.screen.ScreenCaptureStore
+import com.todd.service.context.DeviceContextProvider
 import kotlinx.coroutines.*
 
 class ToddInputMethodService : InputMethodService() {
@@ -178,7 +179,7 @@ class ToddInputMethodService : InputMethodService() {
         val textBefore = ic.getTextBeforeCursor(500, 0)?.toString() ?: ""
         val targetText = if (hasSelection) selectedText.orEmpty() else textBefore
 
-        val screenContext = ToddAccessibilityService.latestScreenContext()
+        val screenContext = DeviceContextProvider.currentTextContext()
         val effectiveText = if (targetText.isNotBlank()) targetText else screenContext
 
         if (effectiveText.isBlank()) {
