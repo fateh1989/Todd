@@ -53,6 +53,9 @@ interface TaskDao {
     @Query("SELECT * FROM tasks WHERE id = :id LIMIT 1")
     suspend fun getTaskById(id: String): Task?
 
+    @Query("SELECT * FROM tasks WHERE projectId = :projectId ORDER BY updatedAt DESC LIMIT 1")
+    suspend fun getLatestTaskForProject(projectId: String): Task?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTask(task: Task)
 
@@ -71,6 +74,9 @@ interface MemoryDao {
     @Query("SELECT * FROM memories WHERE `key` = :key LIMIT 1")
     suspend fun getMemoryByKey(key: String): MemoryEntry?
 
+    @Query("SELECT * FROM memories WHERE projectId = :projectId OR projectId IS NULL ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getRecentMemories(projectId: String, limit: Int): List<MemoryEntry>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertMemory(memory: MemoryEntry)
 
@@ -82,6 +88,9 @@ interface MemoryDao {
 interface FailureDao {
     @Query("SELECT * FROM failures WHERE projectId = :projectId ORDER BY timestamp DESC")
     fun getFailuresForProject(projectId: String): Flow<List<FailureRecord>>
+
+    @Query("SELECT * FROM failures WHERE projectId = :projectId ORDER BY timestamp DESC LIMIT :limit")
+    suspend fun getRecentFailures(projectId: String, limit: Int): List<FailureRecord>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertFailure(failure: FailureRecord)

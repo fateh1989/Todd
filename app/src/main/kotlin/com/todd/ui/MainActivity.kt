@@ -25,6 +25,7 @@ import androidx.compose.ui.unit.sp
 import com.todd.ToddApplication
 import com.todd.core.model.*
 import com.todd.service.overlay.FloatingToddService
+import com.todd.service.accessibility.ToddAccessibilityService
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -75,6 +76,14 @@ fun ToddMainScreen(
     var selectedTab by remember { mutableStateOf(0) }
     val tasks by app.repository.getAllTasks().collectAsState(initial = emptyList())
     val projects by app.repository.getAllProjects().collectAsState(initial = emptyList())
+    val projectId = state.activeProjectId ?: "todd-main"
+    val memories by app.repository.getMemoriesForProject(projectId).collectAsState(initial = emptyList())
+    val chatMessages = remember(memories) {
+        memories
+            .filter { it.layer == MemoryLayer.EPISODIC && it.key.startsWith("chat:") }
+            .sortedBy { it.timestamp }
+    }
+    var isChatBusy by remember { mutableStateOf(false) }
 
     Scaffold(
         topBar = {
@@ -167,18 +176,71 @@ fun ToddMainScreen(
             Spacer(modifier = Modifier.height(16.dp))
 
             when (selectedTab) {
-                0 -> HomeDashboard(state, onTaskAction = { title, goal ->
-                    scope.launch {
-                        val task = stateMachine.planTask(
-                            taskId = "task-${System.currentTimeMillis()}",
-                            projectId = state.activeProjectId ?: "todd-main",
-                            title = title,
-                            goal = goal,
-                            criteria = "Verified by tool response"
-                        )
-                        app.repository.saveTask(task)
+                0 -> HomeDashboard(
+                    state = state,
+                    messages = chatMessages,
+                    isBusy = isChatBusy,
+                    onSendMessage = { message ->
+                        if (message.isNotBlank() && !isChatBusy) {
+                            scope.launch {
+                                isChatBusy = true
+                                val now = System.currentTimeMillis()
+                                val contextBeforeMessage = app.repository.buildProjectContext(projectId)
+
+                                app.repository.saveMemory(
+                                    MemoryEntry(
+                                        id = "chat-user-${System.nanoTime()}",
+                                        projectId = projectId,
+                                        layer = MemoryLayer.EPISODIC,
+                                        key = "chat:user:$now",
+                                        value = message,
+                                        provenance = "USER",
+                                        isVerified = true
+                                    )
+                                )
+
+                                val result = app.aiRouter.route(
+                                    com.todd.core.ai.AIRequest(
+                                        prompt = message,
+                                        projectContext = contextBeforeMessage,
+                                        screenContext = ToddAccessibilityService.latestScreenContext().ifBlank { null }
+                                    ),
+                                    state.aiMode
+                                )
+
+                                val reply = result.fold(
+                                    onSuccess = { it.text },
+                                    onFailure = { "تعذر إكمال الطلب الآن: ${it.message ?: "خطأ غير معروف"}" }
+                                )
+
+                                app.repository.saveMemory(
+                                    MemoryEntry(
+                                        id = "chat-todd-${System.nanoTime()}",
+                                        projectId = projectId,
+                                        layer = MemoryLayer.EPISODIC,
+                                        key = "chat:todd:${System.currentTimeMillis()}",
+                                        value = reply,
+                                        provenance = if (result.isSuccess) "MODEL" else "SYSTEM",
+                                        isVerified = false
+                                    )
+                                )
+                                isChatBusy = false
+                            }
+                        }
+                    },
+                    onTaskAction = { title, goal ->
+                        scope.launch {
+                            val task = stateMachine.planTask(
+                                taskId = "task-${System.currentTimeMillis()}",
+                                projectId = projectId,
+                                title = title,
+                                goal = goal,
+                                criteria = "Verified by tool response"
+                            )
+                            app.repository.saveTask(task)
+                        }
                     }
-                })
+                )
                 1 -> ProjectsView(projects)
                 2 -> ActivityView(tasks)
                 3 -> SettingsView(
@@ -255,17 +317,56 @@ fun StatusCard(state: ToddState, onStartOverlay: () -> Unit) {
 }
 
 @Composable
-fun HomeDashboard(state: ToddState, onTaskAction: (String, String) -> Unit) {
+fun HomeDashboard(
+    state: ToddState,
+    messages: List<MemoryEntry>,
+    isBusy: Boolean,
+    onSendMessage: (String) -> Unit,
+    onTaskAction: (String, String) -> Unit
+) {
     var quickInput by remember { mutableStateOf("") }
 
-    Column {
-        Text("تكليف Todd بمهمة جديدة", fontWeight = FontWeight.Bold, color = Color.White)
+    Column(modifier = Modifier.fillMaxSize()) {
+        Text("محادثة Todd", fontWeight = FontWeight.Bold, color = Color.White)
         Spacer(modifier = Modifier.height(8.dp))
 
+        LazyColumn(
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            items(messages, key = { it.id }) { message ->
+                val isUser = message.key.startsWith("chat:user:")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+                ) {
+                    Surface(
+                        color = if (isUser) Color(0xFF4338CA) else Color(0xFF1E293B),
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth(0.88f)
+                    ) {
+                        Text(
+                            text = message.value,
+                            color = Color.White,
+                            modifier = Modifier.padding(12.dp)
+                        )
+                    }
+                }
+            }
+            if (isBusy) {
+                item {
+                    Text("Todd يعمل...", color = Color(0xFF94A3B8), fontSize = 12.sp)
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
         OutlinedTextField(
             value = quickInput,
             onValueChange = { quickInput = it },
-            placeholder = { Text("اكتب هدفاً، فحص مستودع، أو طلباً برمجياً...") },
+            placeholder = { Text("اكتب لتود...") },
             modifier = Modifier.fillMaxWidth(),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = Color(0xFF6366F1),
@@ -276,19 +377,38 @@ fun HomeDashboard(state: ToddState, onTaskAction: (String, String) -> Unit) {
         )
 
         Spacer(modifier = Modifier.height(8.dp))
-        Button(
-            onClick = {
-                if (quickInput.isNotBlank()) {
-                    onTaskAction(quickInput, "تحقيق الهدف المحدد مع التحقق الكامل")
-                    quickInput = ""
-                }
-            },
-            modifier = Modifier.align(Alignment.End),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End
         ) {
-            Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("بدء الخطة")
+            OutlinedButton(
+                onClick = {
+                    if (quickInput.isNotBlank()) {
+                        onTaskAction(quickInput, quickInput)
+                        quickInput = ""
+                    }
+                },
+                enabled = !isBusy
+            ) {
+                Text("حوّلها إلى مهمة")
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+            Button(
+                onClick = {
+                    val text = quickInput.trim()
+                    if (text.isNotBlank()) {
+                        onSendMessage(text)
+                        quickInput = ""
+                    }
+                },
+                enabled = !isBusy,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1))
+            ) {
+                Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("إرسال")
+            }
         }
     }
 }

@@ -198,11 +198,13 @@ class ToddInputMethodService : InputMethodService() {
         serviceScope.launch {
             try {
                 val app = ToddApplication.instance
+                val projectId = app.stateMachine.state.value.activeProjectId ?: "todd-main"
+                val memoryContext = app.repository.buildProjectContext(projectId)
                 val request = AIRequest(
                     prompt = "$instruction:\n$effectiveText",
                     selectedText = selectedText,
                     screenContext = screenContext.ifBlank { null },
-                    projectContext = "Todd keyboard"
+                    projectContext = memoryContext
                 )
                 val result = app.aiRouter.route(request, app.stateMachine.state.value.aiMode)
                 result.onSuccess { response ->

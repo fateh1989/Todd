@@ -8,28 +8,26 @@ class AIRouter(
 ) {
     suspend fun route(request: AIRequest, mode: AIProviderMode): Result<AIResponse> {
         return when (mode) {
-            AIProviderMode.LOCAL_ONLY -> {
-                localProvider.generateText(request)
-            }
-            AIProviderMode.CLOUD_PREFERRED -> {
-                if (cloudProvider.isAvailable()) {
-                    cloudProvider.generateText(request)
-                } else {
-                    localProvider.generateText(request)
-                }
-            }
+            AIProviderMode.LOCAL_ONLY -> localProvider.generateText(request)
+            AIProviderMode.CLOUD_PREFERRED -> routeCloudThenLocal(request)
             AIProviderMode.AUTO -> {
-                // Auto decision based on context size and tools
-                val isComplex = (request.projectContext?.length ?: 0) > 1000 ||
-                                request.prompt.length > 300 ||
-                                request.screenContext != null
+                val localIsPlaceholder = localProvider.type == ProviderType.LOCAL_MOCK
+                val isComplex =
+                    (request.projectContext?.length ?: 0) > 1000 ||
+                    request.prompt.length > 300 ||
+                    !request.screenContext.isNullOrBlank()
 
-                if (isComplex && cloudProvider.isAvailable()) {
-                    cloudProvider.generateText(request)
-                } else {
-                    localProvider.generateText(request)
-                }
+                if (localIsPlaceholder || isComplex) routeCloudThenLocal(request)
+                else localProvider.generateText(request)
             }
         }
+    }
+
+    private suspend fun routeCloudThenLocal(request: AIRequest): Result<AIResponse> {
+        if (cloudProvider.isAvailable()) {
+            val cloudResult = cloudProvider.generateText(request)
+            if (cloudResult.isSuccess) return cloudResult
+        }
+        return localProvider.generateText(request)
     }
 }
