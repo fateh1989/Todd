@@ -18,6 +18,32 @@ class AIRouterTest {
             Result.failure(IllegalStateException("cloud unavailable"))
     }
 
+    private class FailingLocalProvider : AIProvider {
+        override val type = ProviderType.LOCAL_ON_DEVICE
+        override val capabilities = ProviderCapabilities(isLocal = true)
+
+        override suspend fun isAvailable(): Boolean = false
+
+        override suspend fun generateText(request: AIRequest): Result<AIResponse> =
+            Result.failure(IllegalStateException("local unavailable"))
+    }
+
+    private class SuccessfulCloudProvider : AIProvider {
+        override val type = ProviderType.CLOUD_GEMINI
+        override val capabilities = ProviderCapabilities(isLocal = false)
+
+        override suspend fun isAvailable(): Boolean = true
+
+        override suspend fun generateText(request: AIRequest): Result<AIResponse> =
+            Result.success(
+                AIResponse(
+                    text = "cloud fallback",
+                    providerUsed = ProviderType.CLOUD_GEMINI,
+                    isVerified = false
+                )
+            )
+    }
+
     @Test
     fun `local only mode routes to local provider`() = runBlocking {
         val mockLocal = MockAIProvider()
@@ -43,6 +69,37 @@ class AIRouterTest {
         ).getOrThrow()
 
         assertEquals(ProviderType.LOCAL_MOCK, response.providerUsed)
+    }
+
+    @Test
+    fun `auto mode falls back to cloud when real local provider is unavailable`() = runBlocking {
+        val router = AIRouter(
+            localProvider = FailingLocalProvider(),
+            cloudProvider = SuccessfulCloudProvider()
+        )
+
+        val response = router.route(
+            AIRequest(prompt = "hello"),
+            AIProviderMode.AUTO
+        ).getOrThrow()
+
+        assertEquals(ProviderType.CLOUD_GEMINI, response.providerUsed)
+        assertEquals("cloud fallback", response.text)
+    }
+
+    @Test
+    fun `local only mode never falls back to cloud when local provider is unavailable`() = runBlocking {
+        val router = AIRouter(
+            localProvider = FailingLocalProvider(),
+            cloudProvider = SuccessfulCloudProvider()
+        )
+
+        val result = router.route(
+            AIRequest(prompt = "hello"),
+            AIProviderMode.LOCAL_ONLY
+        )
+
+        assertTrue(result.isFailure)
     }
 
     @Test

@@ -9,7 +9,9 @@ class AIRouter(
     suspend fun route(request: AIRequest, mode: AIProviderMode): Result<AIResponse> {
         return when (mode) {
             AIProviderMode.LOCAL_ONLY -> localProvider.generateText(request)
+
             AIProviderMode.CLOUD_PREFERRED -> routeCloudThenLocal(request)
+
             AIProviderMode.AUTO -> {
                 val localIsPlaceholder = localProvider.type == ProviderType.LOCAL_MOCK
                 val isComplex =
@@ -18,10 +20,27 @@ class AIRouter(
                     !request.screenContext.isNullOrBlank() ||
                     !request.screenImagePath.isNullOrBlank()
 
-                if (localIsPlaceholder || isComplex) routeCloudThenLocal(request)
-                else localProvider.generateText(request)
+                if (localIsPlaceholder || isComplex) {
+                    routeCloudThenLocal(request)
+                } else {
+                    routeLocalThenCloud(request)
+                }
             }
         }
+    }
+
+    private suspend fun routeLocalThenCloud(request: AIRequest): Result<AIResponse> {
+        if (localProvider.isAvailable()) {
+            val localResult = localProvider.generateText(request)
+            if (localResult.isSuccess) return localResult
+        }
+
+        if (cloudProvider.isAvailable()) {
+            val cloudResult = cloudProvider.generateText(request)
+            if (cloudResult.isSuccess) return cloudResult
+        }
+
+        return localProvider.generateText(request)
     }
 
     private suspend fun routeCloudThenLocal(request: AIRequest): Result<AIResponse> {
@@ -29,6 +48,7 @@ class AIRouter(
             val cloudResult = cloudProvider.generateText(request)
             if (cloudResult.isSuccess) return cloudResult
         }
+
         return localProvider.generateText(request)
     }
 }
