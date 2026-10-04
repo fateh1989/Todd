@@ -72,6 +72,9 @@ dependencies {
     implementation(libs.firebase.ai)
     implementation(libs.firebase.appcheck)
 
+    // Local OCR fallback for text rendered inside images/custom UI.
+    implementation(libs.mlkit.text.recognition)
+
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
     androidTestImplementation(libs.androidx.junit)
