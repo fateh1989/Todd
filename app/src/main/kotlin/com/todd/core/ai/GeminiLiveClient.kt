@@ -16,6 +16,20 @@ import com.google.firebase.ai.type.Transcription
 import com.google.firebase.ai.type.liveGenerationConfig
 import com.todd.core.model.AIProviderMode
 import com.todd.core.rules.RulesEngine
+import com.todd.core.rules.ActionCategory
+import com.todd.core.rules.ActionRequest
+import com.todd.core.tools.GitHubTool
+import com.google.firebase.ai.type.FunctionCallPart
+import com.google.firebase.ai.type.FunctionDeclaration
+import com.google.firebase.ai.type.FunctionResponsePart
+import com.google.firebase.ai.type.Schema
+import com.google.firebase.ai.type.Tool
+import kotlinx.coroutines.runBlocking
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
 import com.todd.data.repository.ToddRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -50,6 +64,7 @@ class GeminiLiveClient(
     private val context: Context?,
     private val rulesEngine: RulesEngine,
     private val repository: ToddRepository?,
+    private val githubTool: GitHubTool? = null,
     val liveModelName: String = "gemini-2.5-flash-native-audio-preview-12-2025",
     private val sessionStarter: (suspend () -> Result<Unit>)? = null,
     private val textResponder: (suspend (String) -> Result<String>)? = null
@@ -96,12 +111,14 @@ class GeminiLiveClient(
                 val liveModel = Firebase.ai(backend = GenerativeBackend.googleAI())
                     .liveModel(
                         modelName = liveModelName,
-                        generationConfig = generationConfig
+                        generationConfig = generationConfig,
+                        tools = buildLiveTools()
                     )
 
                 val session = liveModel.connect()
                 liveSession = session
                 session.startAudioConversation(
+                    functionCallHandler = ::handleFunctionCall,
                     transcriptHandler = ::handleTranscription,
                     enableInterruptions = true
                 )
@@ -115,6 +132,126 @@ class GeminiLiveClient(
             abandonAudioFocus()
             Result.failure(e)
         }
+    }
+
+    private fun buildLiveTools(): List<Tool> {
+        if (githubTool == null) return emptyList()
+
+        return listOf(
+            Tool.functionDeclarations(
+                listOf(
+                    FunctionDeclaration(
+                        "checkRepositoryStatus",
+                        "Read the current branch and latest commit for a GitHub repository.",
+                        mapOf(
+                            "repository" to Schema.string("Repository in owner/name format."),
+                            "branch" to Schema.string("Branch name, for example main.")
+                        )
+                    ),
+                    FunctionDeclaration(
+                        "checkLatestWorkflow",
+                        "Read the latest GitHub Actions workflow status and artifact for a repository branch.",
+                        mapOf(
+                            "repository" to Schema.string("Repository in owner/name format."),
+                            "branch" to Schema.string("Branch name, for example main.")
+                        )
+                    )
+                )
+            )
+        )
+    }
+
+    private fun handleFunctionCall(call: FunctionCallPart): FunctionResponsePart {
+        val response: JsonObject = runBlocking {
+            val repo = call.args["repository"]?.jsonPrimitive?.content?.ifBlank { null }
+                ?: "fateh1989/Todd"
+            val branch = call.args["branch"]?.jsonPrimitive?.content?.ifBlank { null }
+                ?: "main"
+
+            val evaluation = rulesEngine.evaluate(
+                ActionRequest(
+                    category = ActionCategory.GIT_READ,
+                    projectId = "todd-main",
+                    target = repo,
+                    dataSummary = "Gemini Live tool call: ${call.name}",
+                    isPreApprovedInInstruction = true
+                )
+            )
+
+            if (!evaluation.isAllowed) {
+                buildJsonObject {
+                    put("ok", false)
+                    put("error", evaluation.promptMessage ?: "Tool call was not approved.")
+                }
+            } else {
+                val tool = githubTool
+                if (tool == null) {
+                    buildJsonObject {
+                        put("ok", false)
+                        put("error", "GitHub tool is not connected.")
+                    }
+                } else {
+                    when (call.name) {
+                        "checkRepositoryStatus" -> {
+                            tool.getRepositoryInfo(repo, branch).fold(
+                                onSuccess = { info ->
+                                    buildJsonObject {
+                                        put("ok", true)
+                                        put("repository", info.fullName)
+                                        put("branch", info.activeBranch)
+                                        put("defaultBranch", info.defaultBranch)
+                                        put("latestCommit", info.latestCommitSha)
+                                    }
+                                },
+                                onFailure = { error ->
+                                    buildJsonObject {
+                                        put("ok", false)
+                                        put("error", error.message ?: "GitHub read failed.")
+                                    }
+                                }
+                            )
+                        }
+
+                        "checkLatestWorkflow" -> {
+                            tool.getLatestWorkflowRun(repo, branch).fold(
+                                onSuccess = { run ->
+                                    if (run == null) {
+                                        buildJsonObject {
+                                            put("ok", true)
+                                            put("found", false)
+                                        }
+                                    } else {
+                                        buildJsonObject {
+                                            put("ok", true)
+                                            put("found", true)
+                                            put("runId", run.runId)
+                                            put("workflow", run.workflowName)
+                                            put("headSha", run.headSha)
+                                            put("status", run.status)
+                                            put("conclusion", run.conclusion ?: "")
+                                            put("artifact", run.artifactName ?: "")
+                                        }
+                                    }
+                                },
+                                onFailure = { error ->
+                                    buildJsonObject {
+                                        put("ok", false)
+                                        put("error", error.message ?: "Workflow read failed.")
+                                    }
+                                }
+                            )
+                        }
+
+                        else -> buildJsonObject {
+                            put("ok", false)
+                            put("error", "Unknown tool: ${call.name}")
+                        }
+                    }
+                }
+            }
+        }
+
+        return FunctionResponsePart(call.name, response, call.id)
     }
 
     private fun handleTranscription(input: Transcription?, output: Transcription?) {
@@ -147,6 +284,7 @@ class GeminiLiveClient(
             scope.launch {
                 try {
                     session.startAudioConversation(
+                        functionCallHandler = ::handleFunctionCall,
                         transcriptHandler = ::handleTranscription,
                         enableInterruptions = true
                     )
