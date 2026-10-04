@@ -11,6 +11,7 @@ import com.todd.core.rules.RulesEngine
 import com.todd.core.state.ToddStateMachine
 import com.todd.core.tools.GitHubRestTool
 import com.todd.core.tools.GitHubTool
+import com.todd.core.tools.GitHubCredentialStore
 
 class ToddApplication : Application() {
 
@@ -29,6 +30,9 @@ class ToddApplication : Application() {
     lateinit var githubTool: GitHubTool
         private set
 
+    lateinit var githubCredentialStore: GitHubCredentialStore
+        private set
+
     lateinit var rulesEngine: RulesEngine
         private set
 
@@ -42,7 +46,8 @@ class ToddApplication : Application() {
         database = ToddDatabase.getDatabase(this)
         repository = ToddRepository(database)
         stateMachine = ToddStateMachine(repository)
-        githubTool = GitHubRestTool()
+        githubCredentialStore = GitHubCredentialStore(this)
+        githubTool = GitHubRestTool(tokenProvider = { githubCredentialStore.getToken() })
         rulesEngine = RulesEngine()
         liveClient = GeminiLiveClient(
             context = this,

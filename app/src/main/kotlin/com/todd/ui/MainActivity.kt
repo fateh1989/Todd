@@ -25,6 +25,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -335,6 +336,9 @@ fun ToddMainScreen(
                     state = state,
                     visualScreenRunning = visualScreen.isRunning,
                     lastVisualCaptureAt = visualScreen.capturedAt,
+                    githubTokenConfigured = app.githubCredentialStore.hasToken(),
+                    onSaveGitHubToken = { token -> app.githubCredentialStore.saveToken(token) },
+                    onClearGitHubToken = { app.githubCredentialStore.clearToken() },
                     onAIModeChange = { mode -> stateMachine.setAIMode(mode) },
                     onOpenAccessibility = onOpenAccessibility,
                     onStartVisualScreen = onStartVisualScreen,
@@ -651,11 +655,16 @@ fun SettingsView(
     state: ToddState,
     visualScreenRunning: Boolean,
     lastVisualCaptureAt: Long,
+    githubTokenConfigured: Boolean,
+    onSaveGitHubToken: (String) -> Unit,
+    onClearGitHubToken: () -> Unit,
     onAIModeChange: (AIProviderMode) -> Unit,
     onOpenAccessibility: () -> Unit,
     onStartVisualScreen: () -> Unit,
     onStopVisualScreen: () -> Unit
 ) {
+    var githubToken by remember { mutableStateOf("") }
+
     Column {
         Text("وضع توجيه الذكاء الاصطناعي (AI Routing)", fontWeight = FontWeight.Bold, color = Color.White)
         Spacer(modifier = Modifier.height(8.dp))
@@ -719,6 +728,46 @@ fun SettingsView(
             )
             Spacer(modifier = Modifier.width(6.dp))
             Text(if (visualScreenRunning) "إيقاف الرؤية البصرية" else "تشغيل الرؤية البصرية")
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+        Text("اتصال GitHub", fontWeight = FontWeight.Bold, color = Color.White)
+        Text(
+            if (githubTokenConfigured) {
+                "التفويض محفوظ ومشفّر داخل Android Keystore."
+            } else {
+                "ألصق رمز GitHub مرة واحدة لتمكين Todd من الكتابة وتنفيذ المهام على المستودعات."
+            },
+            fontSize = 12.sp,
+            color = if (githubTokenConfigured) Color(0xFF10B981) else Color(0xFF94A3B8)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedTextField(
+            value = githubToken,
+            onValueChange = { githubToken = it },
+            label = { Text("GitHub token") },
+            singleLine = true,
+            visualTransformation = PasswordVisualTransformation(),
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Button(
+                onClick = {
+                    if (githubToken.isNotBlank()) {
+                        onSaveGitHubToken(githubToken)
+                        githubToken = ""
+                    }
+                },
+                enabled = githubToken.isNotBlank()
+            ) {
+                Text("حفظ التفويض")
+            }
+            if (githubTokenConfigured) {
+                OutlinedButton(onClick = onClearGitHubToken) {
+                    Text("مسح التفويض")
+                }
+            }
         }
     }
 }
