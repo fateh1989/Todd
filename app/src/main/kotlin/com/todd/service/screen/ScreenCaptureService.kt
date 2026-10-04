@@ -268,5 +268,6 @@ class ScreenCaptureService : Service() {
         private const val CHANNEL_ID = "todd_screen_capture"
         private const val NOTIFICATION_ID = 1002
         private const val CAPTURE_INTERVAL_MS = 1200L
+        private const val OCR_INTERVAL_MS = 2500L
     }
 }
