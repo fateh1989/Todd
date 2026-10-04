@@ -35,11 +35,16 @@ class GeminiAIProvider(
     }
 
     override suspend fun isAvailable(): Boolean {
+        if (!FirebaseRuntimeConfig.current().configured) return false
         return runCatching { generativeModel }.isSuccess
     }
 
     override suspend fun generateText(request: AIRequest): Result<AIResponse> = withContext(Dispatchers.IO) {
         val start = System.currentTimeMillis()
+
+        runCatching { FirebaseRuntimeConfig.requireConfigured() }
+            .exceptionOrNull()
+            ?.let { return@withContext Result.failure(it) }
 
         val contextPrompt = buildString {
             request.systemPrompt?.let { appendLine("System: $it\n") }
