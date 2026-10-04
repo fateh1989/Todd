@@ -137,7 +137,7 @@ class ToddApplication : Application() {
 
         // Cloud provider: current Firebase AI Logic using the Gemini Developer API backend
         // Credentials are secure and managed via Firebase project configuration (no hardcoded keys)
-        val geminiProvider = GeminiAIProvider(modelName = "gemini-3.5-flash-lite")
+        val geminiProvider = GeminiAIProvider(modelName = "gemini-3.8-flash")
 
         aiRouter = AIRouter(
             localProvider = localProvider,
