@@ -87,13 +87,30 @@ class GeminiAIProvider(
                     IllegalStateException("Gemini returned empty content")
                 )
 
+            val sources = response.candidates
+                .firstOrNull()
+                ?.groundingMetadata
+                ?.groundingChunks
+                ?.mapNotNull { chunk ->
+                    val web = chunk.web ?: return@mapNotNull null
+                    val uri = web.uri?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                    AISource(
+                        title = web.title?.takeIf { it.isNotBlank() },
+                        url = uri,
+                        domain = web.domain?.takeIf { it.isNotBlank() }
+                    )
+                }
+                ?.distinctBy { it.url }
+                .orEmpty()
+
             Result.success(
                 AIResponse(
                     text = responseText,
                     providerUsed = ProviderType.CLOUD_GEMINI,
                     isVerified = false,
                     tokensUsed = (contextPrompt.length + responseText.length) / 4,
-                    latencyMs = System.currentTimeMillis() - start
+                    latencyMs = System.currentTimeMillis() - start,
+                    sources = sources
                 )
             )
         } catch (e: Exception) {

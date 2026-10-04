@@ -28,12 +28,19 @@ data class AIRequest(
     val maxTokens: Int = 1024
 )
 
+data class AISource(
+    val title: String? = null,
+    val url: String,
+    val domain: String? = null
+)
+
 data class AIResponse(
     val text: String,
     val providerUsed: ProviderType,
     val isVerified: Boolean = true,
     val tokensUsed: Int = 0,
-    val latencyMs: Long = 0
+    val latencyMs: Long = 0,
+    val sources: List<AISource> = emptyList()
 )
 
 interface AIProvider {

@@ -308,10 +308,26 @@ fun ToddMainScreen(
                                     state.aiMode
                                 )
 
-                                val reply = result.fold(
-                                    onSuccess = { it.text },
-                                    onFailure = { "تعذر إكمال الطلب الآن: ${it.message ?: "خطأ غير معروف"}" }
-                                )
+                                val aiResponse = result.getOrNull()
+                                val reply = if (aiResponse != null) {
+                                    buildString {
+                                        append(aiResponse.text)
+                                        if (aiResponse.sources.isNotEmpty()) {
+                                            appendLine()
+                                            appendLine()
+                                            appendLine("المصادر:")
+                                            aiResponse.sources.take(8).forEachIndexed { index, source ->
+                                                append(index + 1)
+                                                append(". ")
+                                                append(source.title ?: source.domain ?: "مصدر")
+                                                append(" — ")
+                                                appendLine(source.url)
+                                            }
+                                        }
+                                    }.trim()
+                                } else {
+                                    "تعذر إكمال الطلب الآن: ${result.exceptionOrNull()?.message ?: "خطأ غير معروف"}"
+                                }
 
                                 app.repository.saveMemory(
                                     MemoryEntry(
@@ -320,10 +336,28 @@ fun ToddMainScreen(
                                         layer = MemoryLayer.EPISODIC,
                                         key = "chat:todd:${System.currentTimeMillis()}",
                                         value = reply,
-                                        provenance = if (result.isSuccess) "MODEL" else "SYSTEM",
+                                        provenance = if (aiResponse != null) "MODEL" else "SYSTEM",
                                         isVerified = false
                                     )
                                 )
+
+                                aiResponse?.sources?.forEachIndexed { index, source ->
+                                    app.repository.saveMemory(
+                                        MemoryEntry(
+                                            id = "source-${System.nanoTime()}-$index",
+                                            projectId = projectId,
+                                            layer = MemoryLayer.CONNECTED_SOURCE,
+                                            key = "source:${System.currentTimeMillis()}:$index",
+                                            value = buildString {
+                                                source.title?.let { append(it).append(" | ") }
+                                                source.domain?.let { append(it).append(" | ") }
+                                                append(source.url)
+                                            },
+                                            provenance = "TOOL",
+                                            isVerified = true
+                                        )
+                                    )
+                                }
                                 isChatBusy = false
                             }
                         }
