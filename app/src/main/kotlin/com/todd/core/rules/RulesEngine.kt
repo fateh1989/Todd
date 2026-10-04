@@ -5,6 +5,7 @@ import com.todd.core.model.RuleBehavior
 
 enum class ActionCategory {
     GIT_READ,
+    SCREEN_CONTEXT_READ,
     GIT_COMMIT_FEATURE_BRANCH,
     GIT_PUSH_MAIN,
     GIT_DELETE_BRANCH,
@@ -91,6 +92,7 @@ class RulesEngine(private val customRules: List<Rule> = emptyList()) {
     private fun defaultBehaviorFor(category: ActionCategory): RuleBehavior {
         return when (category) {
             ActionCategory.GIT_READ -> RuleBehavior.ALLOW_WITHOUT_ASKING
+            ActionCategory.SCREEN_CONTEXT_READ -> RuleBehavior.ALLOW_WITHOUT_ASKING
             ActionCategory.GIT_COMMIT_FEATURE_BRANCH -> RuleBehavior.ALLOW_IF_PREAPPROVED
             ActionCategory.GIT_PUSH_MAIN -> RuleBehavior.ASK_BEFORE_ACTION
             ActionCategory.SEND_COMMUNICATION -> RuleBehavior.ASK_BEFORE_ACTION

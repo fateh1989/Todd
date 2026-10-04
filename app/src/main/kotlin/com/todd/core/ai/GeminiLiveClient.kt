@@ -10,6 +10,7 @@ import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.AudioTranscriptionConfig
 import com.google.firebase.ai.type.GenerativeBackend
 import com.google.firebase.ai.type.LiveSession
+import com.google.firebase.ai.type.InlineData
 import com.google.firebase.ai.type.PublicPreviewAPI
 import com.google.firebase.ai.type.ResponseModality
 import com.google.firebase.ai.type.Transcription
@@ -31,7 +32,12 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import com.todd.data.repository.ToddRepository
+import com.todd.service.context.DeviceContextProvider
+import com.todd.service.screen.ScreenCaptureStore
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
@@ -40,6 +46,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import java.io.File
 
 enum class GeminiLiveState {
     DISCONNECTED,
@@ -83,6 +90,7 @@ class GeminiLiveClient(
     private val audioManager = context?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
     private var audioFocusRequest: AudioFocusRequest? = null
     private var liveSession: LiveSession? = null
+    private var screenSyncJob: Job? = null
 
     suspend fun startSession(mode: AIProviderMode): Result<Boolean> = withContext(Dispatchers.IO) {
         if (mode == AIProviderMode.LOCAL_ONLY) {
@@ -126,6 +134,7 @@ class GeminiLiveClient(
 
             _isMuted.value = false
             _state.value = GeminiLiveState.LISTENING
+            startScreenAwarenessStreaming()
             Result.success(true)
         } catch (e: Exception) {
             _state.value = GeminiLiveState.ERROR
@@ -135,58 +144,64 @@ class GeminiLiveClient(
     }
 
     private fun buildLiveTools(): List<Tool> {
-        if (githubTool == null) return emptyList()
+        val declarations = mutableListOf(
+            FunctionDeclaration(
+                "getCurrentDeviceContext",
+                "Read Todd's current fused Android context: screen elements, active screen metadata, visual capture state, and recent notifications.",
+                mapOf<String, Schema>()
+            )
+        )
 
-        return listOf(
-            Tool.functionDeclarations(
-                listOf(
-                    FunctionDeclaration(
-                        "checkRepositoryStatus",
-                        "Read the current branch and latest commit for a GitHub repository.",
-                        mapOf(
-                            "repository" to Schema.string("Repository in owner/name format."),
-                            "branch" to Schema.string("Branch name, for example main.")
-                        )
-                    ),
-                    FunctionDeclaration(
-                        "checkLatestWorkflow",
-                        "Read the latest GitHub Actions workflow status and artifact for a repository branch.",
-                        mapOf(
-                            "repository" to Schema.string("Repository in owner/name format."),
-                            "branch" to Schema.string("Branch name, for example main.")
-                        )
-                    ),
-                    FunctionDeclaration(
-                        "listRepositoryFiles",
-                        "List all file paths in a repository branch before deciding which files to inspect.",
-                        mapOf(
-                            "repository" to Schema.string("Repository in owner/name format."),
-                            "branch" to Schema.string("Branch name.")
-                        )
-                    ),
-                    FunctionDeclaration(
-                        "readRepositoryFile",
-                        "Read the current text content of one repository file.",
-                        mapOf(
-                            "repository" to Schema.string("Repository in owner/name format."),
-                            "path" to Schema.string("Repository-relative file path."),
-                            "ref" to Schema.string("Branch or commit SHA.")
-                        )
-                    ),
-                    FunctionDeclaration(
-                        "commitRepositoryFile",
-                        "Create one real Git commit that replaces or creates one text file.",
-                        mapOf(
-                            "repository" to Schema.string("Repository in owner/name format."),
-                            "branch" to Schema.string("Target branch."),
-                            "path" to Schema.string("Repository-relative file path."),
-                            "content" to Schema.string("Complete new file content."),
-                            "message" to Schema.string("Git commit message.")
-                        )
+        if (githubTool != null) {
+            declarations += listOf(
+                FunctionDeclaration(
+                    "checkRepositoryStatus",
+                    "Read the current branch and latest commit for a GitHub repository.",
+                    mapOf(
+                        "repository" to Schema.string("Repository in owner/name format."),
+                        "branch" to Schema.string("Branch name, for example main.")
+                    )
+                ),
+                FunctionDeclaration(
+                    "checkLatestWorkflow",
+                    "Read the latest GitHub Actions workflow status and artifact for a repository branch.",
+                    mapOf(
+                        "repository" to Schema.string("Repository in owner/name format."),
+                        "branch" to Schema.string("Branch name, for example main.")
+                    )
+                ),
+                FunctionDeclaration(
+                    "listRepositoryFiles",
+                    "List all file paths in a repository branch before deciding which files to inspect.",
+                    mapOf(
+                        "repository" to Schema.string("Repository in owner/name format."),
+                        "branch" to Schema.string("Branch name.")
+                    )
+                ),
+                FunctionDeclaration(
+                    "readRepositoryFile",
+                    "Read the current text content of one repository file.",
+                    mapOf(
+                        "repository" to Schema.string("Repository in owner/name format."),
+                        "path" to Schema.string("Repository-relative file path."),
+                        "ref" to Schema.string("Branch or commit SHA.")
+                    )
+                ),
+                FunctionDeclaration(
+                    "commitRepositoryFile",
+                    "Create one real Git commit that replaces or creates one text file.",
+                    mapOf(
+                        "repository" to Schema.string("Repository in owner/name format."),
+                        "branch" to Schema.string("Target branch."),
+                        "path" to Schema.string("Repository-relative file path."),
+                        "content" to Schema.string("Complete new file content."),
+                        "message" to Schema.string("Git commit message.")
                     )
                 )
             )
-        )
+        }
+
+        return listOf(Tool.functionDeclarations(declarations))
     }
 
     private fun handleFunctionCall(call: FunctionCallPart): FunctionResponsePart {
@@ -202,6 +217,7 @@ class GeminiLiveClient(
                 ?: "Todd update"
 
             val category = when (call.name) {
+                "getCurrentDeviceContext" -> ActionCategory.SCREEN_CONTEXT_READ
                 "commitRepositoryFile" ->
                     if (branch == "main" || branch == "master") ActionCategory.GIT_PUSH_MAIN
                     else ActionCategory.GIT_COMMIT_FEATURE_BRANCH
@@ -222,6 +238,16 @@ class GeminiLiveClient(
                 buildJsonObject {
                     put("ok", false)
                     put("error", evaluation.promptMessage ?: "Tool call was not approved.")
+                }
+            } else if (call.name == "getCurrentDeviceContext") {
+                buildJsonObject {
+                    put("ok", true)
+                    put("context", DeviceContextProvider.currentTextContext())
+                    val visual = ScreenCaptureStore.state.value
+                    put("visualCaptureRunning", visual.isRunning)
+                    put("visualWidth", visual.width)
+                    put("visualHeight", visual.height)
+                    put("visualCapturedAt", visual.capturedAt)
                 }
             } else {
                 val tool = githubTool
@@ -380,6 +406,40 @@ class GeminiLiveClient(
         }
     }
 
+    private fun startScreenAwarenessStreaming() {
+        screenSyncJob?.cancel()
+        val session = liveSession ?: return
+
+        screenSyncJob = scope.launch {
+            var lastVisualCaptureAt = 0L
+
+            while (isActive && liveSession === session) {
+                val visual = ScreenCaptureStore.state.value
+                if (
+                    visual.isRunning &&
+                    visual.capturedAt > lastVisualCaptureAt &&
+                    !visual.filePath.isNullOrBlank()
+                ) {
+                    val file = File(visual.filePath)
+                    if (file.exists()) {
+                        runCatching {
+                            session.sendVideoRealtime(
+                                InlineData(
+                                    data = file.readBytes(),
+                                    mimeType = "image/png",
+                                    displayName = "Todd live Android screen"
+                                )
+                            )
+                        }
+                        lastVisualCaptureAt = visual.capturedAt
+                    }
+                }
+
+                delay(1_200L)
+            }
+        }
+    }
+
     fun handleBargeIn() {
         if (_state.value == GeminiLiveState.SPEAKING) {
             _state.value = GeminiLiveState.LISTENING
@@ -413,6 +473,8 @@ class GeminiLiveClient(
     fun endSession() {
         val session = liveSession
         liveSession = null
+        screenSyncJob?.cancel()
+        screenSyncJob = null
 
         session?.stopAudioConversation()
         _state.value = GeminiLiveState.DISCONNECTED
