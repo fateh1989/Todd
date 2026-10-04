@@ -1,62 +1,134 @@
 package com.todd.service.ime
 
+import android.content.ClipboardManager
+import android.content.Context
 import android.inputmethodservice.InputMethodService
 import android.view.KeyEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
-import android.widget.*
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.Toast
 import com.todd.ToddApplication
 import com.todd.core.ai.AIRequest
-import com.todd.service.accessibility.ToddAccessibilityService
-import com.todd.service.screen.ScreenCaptureStore
+import com.todd.core.model.MemoryEntry
+import com.todd.core.model.MemoryLayer
 import com.todd.service.context.DeviceContextProvider
-import kotlinx.coroutines.*
+import com.todd.service.screen.ScreenCaptureStore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.launch
 
 class ToddInputMethodService : InputMethodService() {
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private var isArabic = true
+    private var drawerVisible = false
+
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density).toInt()
 
     override fun onCreateInputView(): View {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(0xFF1E293B.toInt())
-            setPadding(6, 6, 6, 6)
+            setPadding(dp(4), dp(4), dp(4), dp(4))
         }
 
-        val aiBar = HorizontalScrollView(this).apply {
-            isHorizontalScrollBarEnabled = false
-        }
-        val aiBarLayout = LinearLayout(this).apply {
+        val topBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
         }
 
-        val actions = listOf(
-            "✨ Todd" to "ask",
-            "صوّب" to "correct",
-            "أعد صياغة" to "rewrite",
-            "ترجم" to "translate",
+        val drawer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            visibility = View.GONE
+            setPadding(0, dp(4), 0, dp(4))
+        }
+
+        fun addTopButton(label: String, action: () -> Unit, weight: Float = 1f) {
+            val button = Button(this).apply {
+                text = label
+                textSize = 12f
+                minWidth = 0
+                minimumWidth = 0
+                minimumHeight = dp(42)
+                setPadding(dp(4), 0, dp(4), 0)
+                setOnClickListener { action() }
+            }
+            topBar.addView(
+                button,
+                LinearLayout.LayoutParams(0, dp(44), weight).apply {
+                    setMargins(dp(1), dp(1), dp(1), dp(1))
+                }
+            )
+        }
+
+        addTopButton("✨ Todd", { handleAIAction("ask") }, 1.3f)
+        addTopButton("صحح", { handleAIAction("correct") })
+        addTopButton("ترجم", { handleAIAction("translate") })
+        addTopButton("⋮", {
+            drawerVisible = !drawerVisible
+            drawer.visibility = if (drawerVisible) View.VISIBLE else View.GONE
+        }, 0.65f)
+
+        root.addView(topBar)
+
+        fun drawerRow(vararg items: Pair<String, String>) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+            }
+
+            items.forEach { (label, action) ->
+                val button = Button(this).apply {
+                    text = label
+                    textSize = 11f
+                    minWidth = 0
+                    minimumWidth = 0
+                    minimumHeight = dp(42)
+                    setPadding(dp(2), 0, dp(2), 0)
+                    setOnClickListener {
+                        drawerVisible = false
+                        drawer.visibility = View.GONE
+                        when (action) {
+                            "paste" -> pasteClipboard()
+                            "send_project" -> sendCurrentTextToProject()
+                            else -> handleAIAction(action)
+                        }
+                    }
+                }
+                row.addView(
+                    button,
+                    LinearLayout.LayoutParams(0, dp(44), 1f).apply {
+                        setMargins(dp(1), dp(1), dp(1), dp(1))
+                    }
+                )
+            }
+
+            drawer.addView(row)
+        }
+
+        drawerRow(
+            "إعادة صياغة" to "rewrite",
             "لخّص" to "summarize",
             "ردّ" to "reply",
             "اشرح" to "explain"
         )
+        drawerRow(
+            "أكمل" to "continue",
+            "قصّر" to "shorten",
+            "وسّع" to "expand",
+            "غيّر النبرة" to "tone"
+        )
+        drawerRow(
+            "بحث" to "research",
+            "إلى المشروع" to "send_project",
+            "لصق" to "paste",
+            "Todd" to "ask"
+        )
 
-        for ((label, actionKey) in actions) {
-            val btn = Button(this).apply {
-                text = label
-                textSize = 12f
-                setOnClickListener { handleAIAction(actionKey) }
-            }
-            aiBarLayout.addView(
-                btn,
-                LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.WRAP_CONTENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                ).apply { setMargins(2, 2, 2, 2) }
-            )
-        }
-        aiBar.addView(aiBarLayout)
-        root.addView(aiBar)
+        root.addView(drawer)
 
         val keysContainer = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -88,9 +160,10 @@ class ToddInputMethodService : InputMethodService() {
                 rowKeys.forEach { key ->
                     val keyButton = Button(this).apply {
                         text = key
-                        textSize = if (isArabic) 18f else 16f
+                        textSize = if (isArabic) 19f else 17f
                         minWidth = 0
                         minimumWidth = 0
+                        minimumHeight = dp(48)
                         setPadding(0, 0, 0, 0)
                         setOnClickListener {
                             currentInputConnection?.commitText(key, 1)
@@ -98,11 +171,9 @@ class ToddInputMethodService : InputMethodService() {
                     }
                     row.addView(
                         keyButton,
-                        LinearLayout.LayoutParams(
-                            0,
-                            LinearLayout.LayoutParams.WRAP_CONTENT,
-                            1f
-                        ).apply { setMargins(1, 1, 1, 1) }
+                        LinearLayout.LayoutParams(0, dp(50), 1f).apply {
+                            setMargins(dp(1), dp(1), dp(1), dp(1))
+                        }
                     )
                 }
 
@@ -110,7 +181,7 @@ class ToddInputMethodService : InputMethodService() {
                     row,
                     LinearLayout.LayoutParams(
                         LinearLayout.LayoutParams.MATCH_PARENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
+                        dp(52)
                     )
                 )
             }
@@ -121,6 +192,8 @@ class ToddInputMethodService : InputMethodService() {
 
             val langBtn = Button(this).apply {
                 text = if (isArabic) "EN" else "عربي"
+                minWidth = 0
+                minimumWidth = 0
                 setOnClickListener {
                     isArabic = !isArabic
                     renderKeyboard()
@@ -129,11 +202,15 @@ class ToddInputMethodService : InputMethodService() {
 
             val spaceBtn = Button(this).apply {
                 text = if (isArabic) "مسافة" else "Space"
+                minWidth = 0
+                minimumWidth = 0
                 setOnClickListener { currentInputConnection?.commitText(" ", 1) }
             }
 
             val backspaceBtn = Button(this).apply {
                 text = "⌫"
+                minWidth = 0
+                minimumWidth = 0
                 setOnClickListener {
                     val ic = currentInputConnection ?: return@setOnClickListener
                     val selected = ic.getSelectedText(0)
@@ -143,10 +220,16 @@ class ToddInputMethodService : InputMethodService() {
                         ic.deleteSurroundingText(1, 0)
                     }
                 }
+                setOnLongClickListener {
+                    currentInputConnection?.deleteSurroundingText(8, 0)
+                    true
+                }
             }
 
             val enterBtn = Button(this).apply {
                 text = "↵"
+                minWidth = 0
+                minimumWidth = 0
                 setOnClickListener {
                     val ic = currentInputConnection ?: return@setOnClickListener
                     val action = currentInputEditorInfo?.imeOptions?.and(EditorInfo.IME_MASK_ACTION)
@@ -160,10 +243,10 @@ class ToddInputMethodService : InputMethodService() {
                 }
             }
 
-            bottomRow.addView(langBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.5f))
-            bottomRow.addView(spaceBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 5f))
-            bottomRow.addView(backspaceBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.5f))
-            bottomRow.addView(enterBtn, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.5f))
+            bottomRow.addView(langBtn, LinearLayout.LayoutParams(0, dp(52), 1.4f))
+            bottomRow.addView(spaceBtn, LinearLayout.LayoutParams(0, dp(52), 5.2f))
+            bottomRow.addView(backspaceBtn, LinearLayout.LayoutParams(0, dp(52), 1.5f))
+            bottomRow.addView(enterBtn, LinearLayout.LayoutParams(0, dp(52), 1.5f))
 
             keysContainer.addView(bottomRow)
         }
@@ -172,13 +255,18 @@ class ToddInputMethodService : InputMethodService() {
         return root
     }
 
+    private fun currentTargetText(): Pair<String, Boolean> {
+        val ic = currentInputConnection ?: return "" to false
+        val selected = ic.getSelectedText(0)?.toString()
+        if (!selected.isNullOrBlank()) return selected to true
+
+        val before = ic.getTextBeforeCursor(700, 0)?.toString().orEmpty()
+        return before to false
+    }
+
     private fun handleAIAction(action: String) {
         val ic = currentInputConnection ?: return
-        val selectedText = ic.getSelectedText(0)?.toString()
-        val hasSelection = !selectedText.isNullOrBlank()
-        val textBefore = ic.getTextBeforeCursor(500, 0)?.toString() ?: ""
-        val targetText = if (hasSelection) selectedText.orEmpty() else textBefore
-
+        val (targetText, hasSelection) = currentTargetText()
         val screenContext = DeviceContextProvider.currentTextContext()
         val effectiveText = if (targetText.isNotBlank()) targetText else screenContext
 
@@ -188,12 +276,17 @@ class ToddInputMethodService : InputMethodService() {
         }
 
         val instruction = when (action) {
-            "correct" -> "صحح النص التالي مع الحفاظ على معناه"
-            "rewrite" -> "أعد صياغة النص التالي بشكل طبيعي"
+            "correct" -> "صحح النص التالي مع الحفاظ على المعنى وبأقل تغيير ضروري"
+            "rewrite" -> "أعد صياغة النص التالي بشكل طبيعي وواضح"
             "translate" -> "ترجم النص التالي إلى اللغة المناسبة للسياق"
-            "summarize" -> "لخص النص التالي"
-            "reply" -> "اكتب رداً مناسباً على النص التالي"
+            "summarize" -> "لخص النص التالي باختصار"
+            "reply" -> "اكتب رداً مناسباً وطبيعياً على النص التالي"
             "explain" -> "اشرح النص التالي ببساطة"
+            "continue" -> "أكمل النص التالي بنفس الأسلوب والسياق"
+            "shorten" -> "اختصر النص التالي مع الحفاظ على المعنى"
+            "expand" -> "وسّع النص التالي بإضافة تفاصيل مفيدة دون حشو"
+            "tone" -> "أعد كتابة النص التالي بنبرة أنسب للسياق"
+            "research" -> "ابحث بحثاً حياً عن الموضوع التالي وأعطني خلاصة دقيقة مع المصادر المتاحة"
             else -> "أجب عن النص أو الطلب التالي"
         }
 
@@ -202,23 +295,18 @@ class ToddInputMethodService : InputMethodService() {
                 val app = ToddApplication.instance
                 val projectId = app.stateMachine.state.value.activeProjectId ?: "todd-main"
                 val memoryContext = app.repository.buildProjectContext(projectId)
+
                 val request = AIRequest(
                     prompt = "$instruction:\n$effectiveText",
-                    selectedText = selectedText,
+                    selectedText = if (hasSelection) targetText else null,
                     screenContext = screenContext.ifBlank { null },
                     screenImagePath = ScreenCaptureStore.latestFile()?.absolutePath,
                     projectContext = memoryContext
                 )
+
                 val result = app.aiRouter.route(request, app.stateMachine.state.value.aiMode)
                 result.onSuccess { response ->
-                    if (targetText.isNotBlank()) {
-                        if (!hasSelection) {
-                            ic.deleteSurroundingText(targetText.length, 0)
-                        }
-                        ic.commitText(response.text, 1)
-                    } else {
-                        ic.commitText(response.text, 1)
-                    }
+                    ic.commitText(response.text, 1)
                 }.onFailure { err ->
                     Toast.makeText(
                         this@ToddInputMethodService,
@@ -236,8 +324,52 @@ class ToddInputMethodService : InputMethodService() {
         }
     }
 
+    private fun pasteClipboard() {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        val clip = clipboard.primaryClip
+        val text = clip?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty()
+
+        if (text.isBlank()) {
+            Toast.makeText(this, "الحافظة فارغة", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        currentInputConnection?.commitText(text, 1)
+    }
+
+    private fun sendCurrentTextToProject() {
+        val (targetText, _) = currentTargetText()
+        val value = targetText.ifBlank { DeviceContextProvider.currentTextContext() }
+
+        if (value.isBlank()) {
+            Toast.makeText(this, "لا يوجد نص لإرساله إلى المشروع", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        serviceScope.launch {
+            val app = ToddApplication.instance
+            val projectId = app.stateMachine.state.value.activeProjectId ?: "todd-main"
+            app.repository.saveMemory(
+                MemoryEntry(
+                    id = "keyboard-project-${System.nanoTime()}",
+                    projectId = projectId,
+                    layer = MemoryLayer.PROJECT,
+                    key = "keyboard-note:${System.currentTimeMillis()}",
+                    value = value,
+                    provenance = "USER",
+                    isVerified = true
+                )
+            )
+            Toast.makeText(
+                this@ToddInputMethodService,
+                "تمت إضافة النص إلى ذاكرة المشروع",
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
+
     override fun onDestroy() {
-        super.onDestroy()
         serviceScope.cancel()
+        super.onDestroy()
     }
 }
