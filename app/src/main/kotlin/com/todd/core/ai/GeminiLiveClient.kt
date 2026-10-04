@@ -72,7 +72,7 @@ class GeminiLiveClient(
     private val rulesEngine: RulesEngine,
     private val repository: ToddRepository?,
     private val githubTool: GitHubTool? = null,
-    val liveModelName: String = "gemini-2.5-flash-native-audio-preview-12-2025",
+    val liveModelName: String = "gemini-3.1-flash-live-preview",
     private val sessionStarter: (suspend () -> Result<Unit>)? = null,
     private val textResponder: (suspend (String) -> Result<String>)? = null
 ) {
