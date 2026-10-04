@@ -14,10 +14,10 @@ class GeminiAIProvider(
 
     override val capabilities: ProviderCapabilities = ProviderCapabilities(
         supportsText = true,
-        supportsStreaming = true,
-        supportsTools = true,
-        supportsVision = true,
-        supportsAudio = true,
+        supportsStreaming = false,
+        supportsTools = false,
+        supportsVision = false,
+        supportsAudio = false,
         maxContextTokens = 1000000,
         isLocal = false
     )

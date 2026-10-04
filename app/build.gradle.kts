@@ -80,3 +80,53 @@ dependencies {
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
 }
+
+// Ensure a valid google-services.json configuration exists so CI and local builds compile cleanly without requiring secrets in git
+val ensureGoogleServicesJsonTask = tasks.register("ensureGoogleServicesJson") {
+    val googleServicesFile = file("google-services.json")
+    outputs.file(googleServicesFile)
+    doLast {
+        if (!googleServicesFile.exists()) {
+            googleServicesFile.writeText(
+                """
+                {
+                  "project_info": {
+                    "project_number": "000000000000",
+                    "project_id": "todd-ci-build",
+                    "storage_bucket": "todd-ci-build.appspot.com"
+                  },
+                  "client": [
+                    {
+                      "client_info": {
+                        "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+                        "android_client_info": {
+                          "package_name": "com.todd"
+                        }
+                      },
+                      "oauth_client": [],
+                      "api_key": [
+                        {
+                          "current_key": "AIzaSyCiBuildDummyKey0000000000000000000"
+                        }
+                      ],
+                      "services": {
+                        "appinvite_service": {
+                          "other_platform_oauth_client": []
+                        }
+                      }
+                    }
+                  ],
+                  "configuration_version": "1"
+                }
+                """.trimIndent()
+            )
+        }
+    }
+}
+
+tasks.configureEach {
+    if (name.startsWith("process") && name.endsWith("GoogleServices")) {
+        dependsOn(ensureGoogleServicesJsonTask)
+    }
+}
+

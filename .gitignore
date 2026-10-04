@@ -14,3 +14,8 @@ local.properties
 .idea/
 *.iml
 .DS_Store
+.tools/
+
+# Firebase & Google Services
+app/google-services.json
+google-services.json
