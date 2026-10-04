@@ -7,6 +7,7 @@ import android.view.inputmethod.EditorInfo
 import android.widget.*
 import com.todd.ToddApplication
 import com.todd.core.ai.AIRequest
+import com.todd.service.accessibility.ToddAccessibilityService
 import kotlinx.coroutines.*
 
 class ToddInputMethodService : InputMethodService() {
@@ -176,8 +177,11 @@ class ToddInputMethodService : InputMethodService() {
         val textBefore = ic.getTextBeforeCursor(500, 0)?.toString() ?: ""
         val targetText = if (hasSelection) selectedText.orEmpty() else textBefore
 
-        if (targetText.isBlank()) {
-            Toast.makeText(this, "حدد نصاً أو اكتب جملة أولاً", Toast.LENGTH_SHORT).show()
+        val screenContext = ToddAccessibilityService.latestScreenContext()
+        val effectiveText = if (targetText.isNotBlank()) targetText else screenContext
+
+        if (effectiveText.isBlank()) {
+            Toast.makeText(this, "لا يوجد نص أو سياق شاشة متاح حالياً", Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -195,16 +199,21 @@ class ToddInputMethodService : InputMethodService() {
             try {
                 val app = ToddApplication.instance
                 val request = AIRequest(
-                    prompt = "$instruction:\n$targetText",
-                    selectedText = targetText,
+                    prompt = "$instruction:\n$effectiveText",
+                    selectedText = selectedText,
+                    screenContext = screenContext.ifBlank { null },
                     projectContext = "Todd keyboard"
                 )
                 val result = app.aiRouter.route(request, app.stateMachine.state.value.aiMode)
                 result.onSuccess { response ->
-                    if (!hasSelection) {
-                        ic.deleteSurroundingText(targetText.length, 0)
+                    if (targetText.isNotBlank()) {
+                        if (!hasSelection) {
+                            ic.deleteSurroundingText(targetText.length, 0)
+                        }
+                        ic.commitText(response.text, 1)
+                    } else {
+                        ic.commitText(response.text, 1)
                     }
-                    ic.commitText(response.text, 1)
                 }.onFailure { err ->
                     Toast.makeText(
                         this@ToddInputMethodService,

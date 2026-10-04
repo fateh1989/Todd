@@ -33,7 +33,10 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         setContent {
             ToddMainScreen(
-                onStartOverlay = { checkOverlayPermissionAndStart() }
+                onStartOverlay = { checkOverlayPermissionAndStart() },
+                onOpenAccessibility = {
+                    startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+                }
             )
         }
     }
@@ -60,7 +63,10 @@ class MainActivity : ComponentActivity() {
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ToddMainScreen(onStartOverlay: () -> Unit) {
+fun ToddMainScreen(
+    onStartOverlay: () -> Unit,
+    onOpenAccessibility: () -> Unit
+) {
     val app = ToddApplication.instance
     val stateMachine = app.stateMachine
     val state by stateMachine.state.collectAsState()
@@ -175,9 +181,11 @@ fun ToddMainScreen(onStartOverlay: () -> Unit) {
                 })
                 1 -> ProjectsView(projects)
                 2 -> ActivityView(tasks)
-                3 -> SettingsView(state, onAIModeChange = { mode ->
-                    stateMachine.setAIMode(mode)
-                })
+                3 -> SettingsView(
+                    state = state,
+                    onAIModeChange = { mode -> stateMachine.setAIMode(mode) },
+                    onOpenAccessibility = onOpenAccessibility
+                )
             }
         }
     }
@@ -339,7 +347,11 @@ fun ActivityView(tasks: List<Task>) {
 }
 
 @Composable
-fun SettingsView(state: ToddState, onAIModeChange: (AIProviderMode) -> Unit) {
+fun SettingsView(
+    state: ToddState,
+    onAIModeChange: (AIProviderMode) -> Unit,
+    onOpenAccessibility: () -> Unit
+) {
     Column {
         Text("وضع توجيه الذكاء الاصطناعي (AI Routing)", fontWeight = FontWeight.Bold, color = Color.White)
         Spacer(modifier = Modifier.height(8.dp))
@@ -360,6 +372,21 @@ fun SettingsView(state: ToddState, onAIModeChange: (AIProviderMode) -> Unit) {
                 onClick = { onAIModeChange(AIProviderMode.CLOUD_PREFERRED) },
                 label = { Text("سحابي مسبق") }
             )
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+        Text("فهم الشاشة", fontWeight = FontWeight.Bold, color = Color.White)
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            "فعّل خدمة Todd لإمكانية الوصول ليقرأ عناصر الشاشة ويستخدمها كسياق أثناء العمل.",
+            fontSize = 12.sp,
+            color = Color(0xFF94A3B8)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(onClick = onOpenAccessibility) {
+            Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text("فتح إعدادات فهم الشاشة")
         }
     }
 }
