@@ -46,6 +46,15 @@ class LocalOnDeviceAIProvider(
         }.getOrDefault(false)
     }
 
+    suspend fun prepareModel(): Result<Unit> = withContext(Dispatchers.IO) {
+        runCatching {
+            ensureModelReady()
+            if (model.onDeviceExtension?.checkStatus() != OnDeviceModelStatus.AVAILABLE) {
+                throw IllegalStateException("On-device Gemini did not become available after preparation.")
+            }
+        }
+    }
+
     private suspend fun ensureModelReady() {
         val extension = model.onDeviceExtension
             ?: throw IllegalStateException("On-device Gemini is not supported on this device.")

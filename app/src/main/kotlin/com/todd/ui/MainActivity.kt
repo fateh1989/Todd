@@ -34,6 +34,8 @@ import com.todd.ToddApplication
 import com.todd.core.model.*
 import com.todd.core.ai.GeminiLiveState
 import com.todd.core.ai.LiveTranscriptItem
+import com.todd.core.ai.FirebaseRuntimeConfig
+import com.todd.core.ai.LocalOnDeviceAIProvider
 import com.todd.core.remote.RemoteExecutionMode
 import com.todd.core.remote.RemoteJobRequest
 import com.todd.service.overlay.FloatingToddService
@@ -168,6 +170,9 @@ fun ToddMainScreen(
             .sortedBy { it.timestamp }
     }
     var isChatBusy by remember { mutableStateOf(false) }
+    var localAIStatus by remember { mutableStateOf("لم يتم فحص النموذج المحلي بعد") }
+    var localAIBusy by remember { mutableStateOf(false) }
+    val firebaseRuntimeStatus = remember { FirebaseRuntimeConfig.current() }
 
     Scaffold(
         topBar = {
@@ -471,6 +476,38 @@ fun ToddMainScreen(
                     visualScreenRunning = visualScreen.isRunning,
                     lastVisualCaptureAt = visualScreen.capturedAt,
                     githubTokenConfigured = app.githubCredentialStore.hasToken(),
+                    firebaseConfigured = firebaseRuntimeStatus.configured,
+                    firebaseProjectId = firebaseRuntimeStatus.projectId,
+                    firebaseReason = firebaseRuntimeStatus.reason,
+                    localAIStatus = localAIStatus,
+                    localAIBusy = localAIBusy,
+                    onCheckLocalAI = {
+                        scope.launch {
+                            localAIBusy = true
+                            val available = app.aiRouter.localProvider.isAvailable()
+                            localAIStatus = if (available) {
+                                "النموذج المحلي متاح الآن على هذا الجهاز"
+                            } else {
+                                "النموذج المحلي غير جاهز بعد أو غير مدعوم على هذا الجهاز"
+                            }
+                            localAIBusy = false
+                        }
+                    },
+                    onPrepareLocalAI = {
+                        scope.launch {
+                            localAIBusy = true
+                            val provider = app.aiRouter.localProvider as? LocalOnDeviceAIProvider
+                            localAIStatus = if (provider == null) {
+                                "مزود الذكاء المحلي الحالي لا يدعم التهيئة"
+                            } else {
+                                provider.prepareModel().fold(
+                                    onSuccess = { "تم تجهيز النموذج المحلي وأصبح متاحاً" },
+                                    onFailure = { "تعذر تجهيز النموذج المحلي: ${it.message ?: "خطأ غير معروف"}" }
+                                )
+                            }
+                            localAIBusy = false
+                        }
+                    },
                     onSaveGitHubToken = { token -> app.githubCredentialStore.saveToken(token) },
                     onClearGitHubToken = { app.githubCredentialStore.clearToken() },
                     onAIModeChange = { mode -> stateMachine.setAIMode(mode) },
@@ -857,6 +894,13 @@ fun SettingsView(
     visualScreenRunning: Boolean,
     lastVisualCaptureAt: Long,
     githubTokenConfigured: Boolean,
+    firebaseConfigured: Boolean,
+    firebaseProjectId: String?,
+    firebaseReason: String?,
+    localAIStatus: String,
+    localAIBusy: Boolean,
+    onCheckLocalAI: () -> Unit,
+    onPrepareLocalAI: () -> Unit,
     onSaveGitHubToken: (String) -> Unit,
     onClearGitHubToken: () -> Unit,
     onAIModeChange: (AIProviderMode) -> Unit,
@@ -887,6 +931,46 @@ fun SettingsView(
                 onClick = { onAIModeChange(AIProviderMode.CLOUD_PREFERRED) },
                 label = { Text("سحابي مسبق") }
             )
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+        Text("حالة الذكاء", fontWeight = FontWeight.Bold, color = Color.White)
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            if (firebaseConfigured) {
+                "الذكاء السحابي: Firebase جاهز" +
+                    (firebaseProjectId?.let { " • المشروع: $it" } ?: "")
+            } else {
+                "الذكاء السحابي: غير مهيأ للتشغيل الحقيقي" +
+                    (firebaseReason?.let { " • $it" } ?: "")
+            },
+            fontSize = 12.sp,
+            color = if (firebaseConfigured) Color(0xFF10B981) else Color(0xFFF59E0B)
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            "الذكاء المحلي: $localAIStatus",
+            fontSize = 12.sp,
+            color = Color(0xFFCBD5E1)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedButton(
+                onClick = onCheckLocalAI,
+                enabled = !localAIBusy
+            ) {
+                Icon(Icons.Default.Memory, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(5.dp))
+                Text("فحص المحلي")
+            }
+            Button(
+                onClick = onPrepareLocalAI,
+                enabled = !localAIBusy
+            ) {
+                Icon(Icons.Default.Download, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(5.dp))
+                Text(if (localAIBusy) "جارٍ التجهيز..." else "تجهيز النموذج")
+            }
         }
 
         Spacer(modifier = Modifier.height(20.dp))
