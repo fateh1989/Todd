@@ -4,6 +4,7 @@ import android.graphics.BitmapFactory
 import com.google.firebase.Firebase
 import com.google.firebase.ai.ai
 import com.google.firebase.ai.type.GenerativeBackend
+import com.google.firebase.ai.type.Tool
 import com.google.firebase.ai.type.content
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -18,7 +19,7 @@ class GeminiAIProvider(
     override val capabilities: ProviderCapabilities = ProviderCapabilities(
         supportsText = true,
         supportsStreaming = false,
-        supportsTools = false,
+        supportsTools = true,
         supportsVision = true,
         supportsAudio = false,
         maxContextTokens = 1000000,
@@ -27,7 +28,10 @@ class GeminiAIProvider(
 
     private val generativeModel by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
         Firebase.ai(backend = GenerativeBackend.googleAI())
-            .generativeModel(modelName = modelName)
+            .generativeModel(
+                modelName = modelName,
+                tools = listOf(Tool.googleSearch())
+            )
     }
 
     override suspend fun isAvailable(): Boolean {
