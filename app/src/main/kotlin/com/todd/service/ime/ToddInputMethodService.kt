@@ -8,6 +8,7 @@ import android.widget.*
 import com.todd.ToddApplication
 import com.todd.core.ai.AIRequest
 import com.todd.service.accessibility.ToddAccessibilityService
+import com.todd.service.screen.ScreenCaptureStore
 import kotlinx.coroutines.*
 
 class ToddInputMethodService : InputMethodService() {
@@ -204,6 +205,7 @@ class ToddInputMethodService : InputMethodService() {
                     prompt = "$instruction:\n$effectiveText",
                     selectedText = selectedText,
                     screenContext = screenContext.ifBlank { null },
+                    screenImagePath = ScreenCaptureStore.latestFile()?.absolutePath,
                     projectContext = memoryContext
                 )
                 val result = app.aiRouter.route(request, app.stateMachine.state.value.aiMode)

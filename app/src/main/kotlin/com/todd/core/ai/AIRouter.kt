@@ -15,7 +15,8 @@ class AIRouter(
                 val isComplex =
                     (request.projectContext?.length ?: 0) > 1000 ||
                     request.prompt.length > 300 ||
-                    !request.screenContext.isNullOrBlank()
+                    !request.screenContext.isNullOrBlank() ||
+                    !request.screenImagePath.isNullOrBlank()
 
                 if (localIsPlaceholder || isComplex) routeCloudThenLocal(request)
                 else localProvider.generateText(request)

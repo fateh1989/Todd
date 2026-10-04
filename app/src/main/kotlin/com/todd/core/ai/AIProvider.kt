@@ -22,6 +22,7 @@ data class AIRequest(
     val systemPrompt: String? = null,
     val selectedText: String? = null,
     val screenContext: String? = null,
+    val screenImagePath: String? = null,
     val projectContext: String? = null,
     val temperature: Float = 0.7f,
     val maxTokens: Int = 1024

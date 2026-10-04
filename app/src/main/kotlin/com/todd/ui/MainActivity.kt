@@ -290,7 +290,8 @@ fun ToddMainScreen(
                                     com.todd.core.ai.AIRequest(
                                         prompt = message,
                                         projectContext = contextBeforeMessage,
-                                        screenContext = ToddAccessibilityService.latestScreenContext().ifBlank { null }
+                                        screenContext = ToddAccessibilityService.latestScreenContext().ifBlank { null },
+                                        screenImagePath = ScreenCaptureStore.latestFile()?.absolutePath
                                     ),
                                     state.aiMode
                                 )
