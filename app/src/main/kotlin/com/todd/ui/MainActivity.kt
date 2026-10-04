@@ -435,7 +435,37 @@ fun ToddMainScreen(
                     }
                 )
                 1 -> ProjectsView(projects)
-                2 -> ActivityView(tasks)
+                2 -> ActivityView(
+                    tasks = tasks,
+                    onRefreshRemote = { task ->
+                        scope.launch {
+                            val result = app.remoteExecutor.reconnect(task.id)
+                            result.exceptionOrNull()?.let { error ->
+                                app.repository.updateTask(
+                                    task.copy(
+                                        currentStep = "تعذر تحديث المهمة البعيدة: ${error.message ?: "خطأ غير معروف"}",
+                                        failureCause = error.message,
+                                        updatedAt = System.currentTimeMillis()
+                                    )
+                                )
+                            }
+                        }
+                    },
+                    onCancelRemote = { task ->
+                        scope.launch {
+                            val result = app.remoteExecutor.requestCancel(task.id)
+                            result.exceptionOrNull()?.let { error ->
+                                app.repository.updateTask(
+                                    task.copy(
+                                        currentStep = "تعذر إلغاء المهمة البعيدة: ${error.message ?: "خطأ غير معروف"}",
+                                        failureCause = error.message,
+                                        updatedAt = System.currentTimeMillis()
+                                    )
+                                )
+                            }
+                        }
+                    }
+                )
                 3 -> SettingsView(
                     state = state,
                     visualScreenRunning = visualScreen.isRunning,
@@ -722,9 +752,23 @@ fun ProjectsView(projects: List<Project>) {
 }
 
 @Composable
-fun ActivityView(tasks: List<Task>) {
+fun ActivityView(
+    tasks: List<Task>,
+    onRefreshRemote: (Task) -> Unit,
+    onCancelRemote: (Task) -> Unit
+) {
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         items(tasks) { task ->
+            val remoteActive = task.status in setOf(
+                TaskStatus.PLANNED,
+                TaskStatus.IN_PROGRESS,
+                TaskStatus.WAITING,
+                TaskStatus.EXECUTED,
+                TaskStatus.VERIFYING,
+                TaskStatus.BLOCKED,
+                TaskStatus.PAUSED
+            )
+
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
                 modifier = Modifier.fillMaxWidth()
@@ -735,19 +779,71 @@ fun ActivityView(tasks: List<Task>) {
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(task.title, fontWeight = FontWeight.SemiBold, color = Color.White)
-                        Badge(containerColor = when (task.status) {
-                            TaskStatus.COMPLETED, TaskStatus.VERIFIED -> Color(0xFF10B981)
-                            TaskStatus.FAILED -> Color(0xFFEF4444)
-                            TaskStatus.IN_PROGRESS, TaskStatus.WAITING -> Color(0xFFF59E0B)
-                            else -> Color(0xFF64748B)
-                        }) {
+                        Badge(
+                            containerColor = when (task.status) {
+                                TaskStatus.COMPLETED, TaskStatus.VERIFIED -> Color(0xFF10B981)
+                                TaskStatus.FAILED, TaskStatus.CANCELLED -> Color(0xFFEF4444)
+                                TaskStatus.IN_PROGRESS,
+                                TaskStatus.WAITING,
+                                TaskStatus.VERIFYING -> Color(0xFFF59E0B)
+                                TaskStatus.BLOCKED, TaskStatus.PAUSED -> Color(0xFF8B5CF6)
+                                else -> Color(0xFF64748B)
+                            }
+                        ) {
                             Text(task.status.name, fontSize = 10.sp)
                         }
                     }
+
                     Spacer(modifier = Modifier.height(4.dp))
-                    Text("الخطوة: ${task.currentStep}", fontSize = 12.sp, color = Color(0xFF94A3B8))
+                    Text(
+                        "الخطوة: ${task.currentStep}",
+                        fontSize = 12.sp,
+                        color = Color(0xFF94A3B8)
+                    )
+
                     task.lastEvidence?.let {
-                        Text("الدليل: $it", fontSize = 11.sp, color = Color(0xFF10B981))
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            "الدليل: $it",
+                            fontSize = 11.sp,
+                            color = Color(0xFF10B981)
+                        )
+                    }
+
+                    task.failureCause?.let {
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text(
+                            "الخطأ: $it",
+                            fontSize = 11.sp,
+                            color = Color(0xFFFCA5A5)
+                        )
+                    }
+
+                    if (remoteActive) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { onRefreshRemote(task) }) {
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text("تحديث")
+                            }
+
+                            if (task.status != TaskStatus.BLOCKED && task.status != TaskStatus.PAUSED) {
+                                OutlinedButton(onClick = { onCancelRemote(task) }) {
+                                    Icon(
+                                        Icons.Default.Stop,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(5.dp))
+                                    Text("إلغاء")
+                                }
+                            }
+                        }
                     }
                 }
             }
