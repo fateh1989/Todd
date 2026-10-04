@@ -48,11 +48,15 @@ The keyboard should support:
 - quick switch between normal keyboard mode and AI mode.
 
 ### Screen awareness
-Use two permission-based paths:
-- `AccessibilityService` for semantic UI text/elements where available;
-- `MediaProjection` for an explicit screen capture session when visual understanding is required.
+Screen understanding is a core capability. When enabled by the owner, Todd should combine every useful Android context channel available to it instead of relying on only one:
+- `AccessibilityService` for semantic UI text, elements, bounds, roles, package/window state, and focused/editable controls;
+- `MediaProjection` for continuous visual screen frames when visual context is needed;
+- visual model analysis and OCR fallback for text, icons, images, custom-drawn UI, diagrams, and layout that accessibility does not expose;
+- Todd Keyboard `InputConnection`, notifications, clipboard context when enabled, and current project/task context.
 
-Todd must clearly indicate when screen access is active. It must not assume it can read protected or inaccessible content.
+If one path returns little or nothing, Todd should automatically continue with the other available paths and fuse them into one current device/screen context. Todd itself should not maintain an artificial app/content blocklist that reduces the owner's requested understanding. Actual Android API/OS limits remain technical limits; Todd should try the other available channels rather than fabricate unseen data.
+
+Continuous visual capture must have a visible active-state indicator because it is a real Android `MediaProjection` session.
 
 ## AI architecture
 
