@@ -155,6 +155,34 @@ class GeminiLiveClient(
                             "repository" to Schema.string("Repository in owner/name format."),
                             "branch" to Schema.string("Branch name, for example main.")
                         )
+                    ),
+                    FunctionDeclaration(
+                        "listRepositoryFiles",
+                        "List all file paths in a repository branch before deciding which files to inspect.",
+                        mapOf(
+                            "repository" to Schema.string("Repository in owner/name format."),
+                            "branch" to Schema.string("Branch name.")
+                        )
+                    ),
+                    FunctionDeclaration(
+                        "readRepositoryFile",
+                        "Read the current text content of one repository file.",
+                        mapOf(
+                            "repository" to Schema.string("Repository in owner/name format."),
+                            "path" to Schema.string("Repository-relative file path."),
+                            "ref" to Schema.string("Branch or commit SHA.")
+                        )
+                    ),
+                    FunctionDeclaration(
+                        "commitRepositoryFile",
+                        "Create one real Git commit that replaces or creates one text file.",
+                        mapOf(
+                            "repository" to Schema.string("Repository in owner/name format."),
+                            "branch" to Schema.string("Target branch."),
+                            "path" to Schema.string("Repository-relative file path."),
+                            "content" to Schema.string("Complete new file content."),
+                            "message" to Schema.string("Git commit message.")
+                        )
                     )
                 )
             )
@@ -167,10 +195,22 @@ class GeminiLiveClient(
                 ?: "fateh1989/Todd"
             val branch = call.args["branch"]?.jsonPrimitive?.content?.ifBlank { null }
                 ?: "main"
+            val path = call.args["path"]?.jsonPrimitive?.content.orEmpty()
+            val ref = call.args["ref"]?.jsonPrimitive?.content?.ifBlank { null } ?: branch
+            val content = call.args["content"]?.jsonPrimitive?.content.orEmpty()
+            val commitMessage = call.args["message"]?.jsonPrimitive?.content?.ifBlank { null }
+                ?: "Todd update"
+
+            val category = when (call.name) {
+                "commitRepositoryFile" ->
+                    if (branch == "main" || branch == "master") ActionCategory.GIT_PUSH_MAIN
+                    else ActionCategory.GIT_COMMIT_FEATURE_BRANCH
+                else -> ActionCategory.GIT_READ
+            }
 
             val evaluation = rulesEngine.evaluate(
                 ActionRequest(
-                    category = ActionCategory.GIT_READ,
+                    category = category,
                     projectId = "todd-main",
                     target = repo,
                     dataSummary = "Gemini Live tool call: ${call.name}",
@@ -240,6 +280,80 @@ class GeminiLiveClient(
                                     }
                                 }
                             )
+                        }
+
+                        "listRepositoryFiles" -> {
+                            tool.listRepositoryFiles(repo, branch).fold(
+                                onSuccess = { files ->
+                                    buildJsonObject {
+                                        put("ok", true)
+                                        put("count", files.size)
+                                        put("files", files.joinToString("\n"))
+                                    }
+                                },
+                                onFailure = { error ->
+                                    buildJsonObject {
+                                        put("ok", false)
+                                        put("error", error.message ?: "Repository tree read failed.")
+                                    }
+                                }
+                            )
+                        }
+
+                        "readRepositoryFile" -> {
+                            if (path.isBlank()) {
+                                buildJsonObject {
+                                    put("ok", false)
+                                    put("error", "File path is required.")
+                                }
+                            } else {
+                                tool.readFile(repo, path, ref).fold(
+                                    onSuccess = { file ->
+                                        buildJsonObject {
+                                            put("ok", true)
+                                            put("path", file.path)
+                                            put("sha", file.sha)
+                                            put("content", file.content)
+                                        }
+                                    },
+                                    onFailure = { error ->
+                                        buildJsonObject {
+                                            put("ok", false)
+                                            put("error", error.message ?: "File read failed.")
+                                        }
+                                    }
+                                )
+                            }
+                        }
+
+                        "commitRepositoryFile" -> {
+                            if (path.isBlank() || content.isBlank()) {
+                                buildJsonObject {
+                                    put("ok", false)
+                                    put("error", "Path and complete file content are required.")
+                                }
+                            } else {
+                                tool.createCommit(
+                                    repoFullName = repo,
+                                    branch = branch,
+                                    commitMessage = commitMessage,
+                                    files = mapOf(path to content)
+                                ).fold(
+                                    onSuccess = { sha ->
+                                        buildJsonObject {
+                                            put("ok", true)
+                                            put("commitSha", sha)
+                                            put("path", path)
+                                        }
+                                    },
+                                    onFailure = { error ->
+                                        buildJsonObject {
+                                            put("ok", false)
+                                            put("error", error.message ?: "Commit failed.")
+                                        }
+                                    }
+                                )
+                            }
                         }
 
                         else -> buildJsonObject {

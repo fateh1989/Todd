@@ -27,9 +27,17 @@ data class GitHubWorkflowRun(
     val artifactName: String?
 )
 
+data class GitHubFileContent(
+    val path: String,
+    val sha: String,
+    val content: String
+)
+
 interface GitHubTool {
     suspend fun getRepositoryInfo(repoFullName: String, branch: String): Result<GitHubRepositoryInfo>
     suspend fun getLatestWorkflowRun(repoFullName: String, branch: String): Result<GitHubWorkflowRun?>
+    suspend fun listRepositoryFiles(repoFullName: String, branch: String): Result<List<String>>
+    suspend fun readFile(repoFullName: String, path: String, ref: String): Result<GitHubFileContent>
     suspend fun verifyApkArtifact(runId: Long, expectedCommitSha: String): Result<Boolean>
     suspend fun createCommit(
         repoFullName: String,
@@ -92,6 +100,58 @@ class GitHubRestTool(
                 artifactName = artifactName
             )
         }
+    }
+
+    override suspend fun listRepositoryFiles(
+        repoFullName: String,
+        branch: String
+    ): Result<List<String>> = runCatching {
+        val branchJson = requestJson(
+            "GET",
+            "/repos/${repoPath(repoFullName)}/branches/${encodePathSegment(branch)}"
+        )
+        val commitSha = branchJson.getJSONObject("commit").getString("sha")
+        val commitJson = requestJson(
+            "GET",
+            "/repos/${repoPath(repoFullName)}/git/commits/$commitSha"
+        )
+        val treeSha = commitJson.getJSONObject("tree").getString("sha")
+        val treeJson = requestJson(
+            "GET",
+            "/repos/${repoPath(repoFullName)}/git/trees/$treeSha?recursive=1"
+        )
+        val tree = treeJson.getJSONArray("tree")
+        buildList {
+            for (i in 0 until tree.length()) {
+                val item = tree.getJSONObject(i)
+                if (item.optString("type") == "blob") {
+                    add(item.getString("path"))
+                }
+            }
+        }
+    }
+
+    override suspend fun readFile(
+        repoFullName: String,
+        path: String,
+        ref: String
+    ): Result<GitHubFileContent> = runCatching {
+        val fileJson = requestJson(
+            "GET",
+            "/repos/${repoPath(repoFullName)}/contents/${encodeRepositoryPath(path)}?ref=${encodeQuery(ref)}"
+        )
+        if (fileJson.optString("type") != "file") {
+            throw IllegalArgumentException("Requested path is not a file: $path")
+        }
+
+        val encoded = fileJson.getString("content").replace("\n", "")
+        val decoded = String(Base64.getDecoder().decode(encoded), Charsets.UTF_8)
+
+        GitHubFileContent(
+            path = fileJson.getString("path"),
+            sha = fileJson.getString("sha"),
+            content = decoded
+        )
     }
 
     override suspend fun verifyApkArtifact(
@@ -251,6 +311,9 @@ class GitHubRestTool(
     private fun encodePathSegment(value: String): String =
         URLEncoder.encode(value, Charsets.UTF_8.name()).replace("+", "%20")
 
+    private fun encodeRepositoryPath(value: String): String =
+        value.split("/").joinToString("/") { encodePathSegment(it) }
+
     private fun encodeQuery(value: String): String =
         URLEncoder.encode(value, Charsets.UTF_8.name()).replace("+", "%20")
 
@@ -321,6 +384,19 @@ class SimulatedGitHubTool : GitHubTool {
         repoFullName: String,
         branch: String
     ): Result<GitHubWorkflowRun?> = Result.success(null)
+
+    override suspend fun listRepositoryFiles(
+        repoFullName: String,
+        branch: String
+    ): Result<List<String>> = Result.success(emptyList())
+
+    override suspend fun readFile(
+        repoFullName: String,
+        path: String,
+        ref: String
+    ): Result<GitHubFileContent> = Result.failure(
+        IllegalStateException("SimulatedGitHubTool does not read real repository files.")
+    )
 
     override suspend fun verifyApkArtifact(
         runId: Long,
