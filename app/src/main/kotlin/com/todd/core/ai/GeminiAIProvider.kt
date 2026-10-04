@@ -1,13 +1,13 @@
 package com.todd.core.ai
 
 import com.google.firebase.Firebase
-import com.google.firebase.vertexai.GenerativeModel
-import com.google.firebase.vertexai.vertexAI
+import com.google.firebase.ai.ai
+import com.google.firebase.ai.type.GenerativeBackend
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
 class GeminiAIProvider(
-    private val modelName: String = "gemini-2.0-flash"
+    private val modelName: String = "gemini-3.8-flash"
 ) : AIProvider {
 
     override val type: ProviderType = ProviderType.CLOUD_GEMINI
@@ -22,26 +22,16 @@ class GeminiAIProvider(
         isLocal = false
     )
 
-    private var generativeModel: GenerativeModel? = null
-
-    init {
-        try {
-            generativeModel = Firebase.vertexAI.generativeModel(modelName = modelName)
-        } catch (_: Exception) {
-            generativeModel = null
-        }
+    private val generativeModel by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        Firebase.ai(backend = GenerativeBackend.googleAI())
+            .generativeModel(modelName = modelName)
     }
 
     override suspend fun isAvailable(): Boolean {
-        return generativeModel != null
+        return runCatching { generativeModel }.isSuccess
     }
 
     override suspend fun generateText(request: AIRequest): Result<AIResponse> = withContext(Dispatchers.IO) {
-        val model = generativeModel
-            ?: return@withContext Result.failure(
-                IllegalStateException("Firebase Vertex AI is not initialized. Please ensure google-services.json is configured.")
-            )
-
         val start = System.currentTimeMillis()
 
         val contextPrompt = buildString {
@@ -53,9 +43,11 @@ class GeminiAIProvider(
         }
 
         try {
-            val response = model.generateContent(contextPrompt)
+            val response = generativeModel.generateContent(contextPrompt)
             val responseText = response.text
-                ?: return@withContext Result.failure(IllegalStateException("Gemini returned empty content"))
+                ?: return@withContext Result.failure(
+                    IllegalStateException("Gemini returned empty content")
+                )
 
             Result.success(
                 AIResponse(

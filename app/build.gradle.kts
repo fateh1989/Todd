@@ -66,9 +66,9 @@ dependencies {
     implementation(libs.kotlinx.coroutines.core)
     implementation(libs.kotlinx.coroutines.android)
 
-    // Firebase official BoM & AI Logic (Vertex AI) & App Check
+    // Firebase AI Logic and App Check
     implementation(platform(libs.firebase.bom))
-    implementation(libs.firebase.vertexai)
+    implementation(libs.firebase.ai)
     implementation(libs.firebase.appcheck)
 
     testImplementation(libs.junit)

@@ -33,9 +33,9 @@ class ToddApplication : Application() {
         // Local provider: deterministic, offline-first
         val mockProvider = MockAIProvider()
 
-        // Cloud provider: official Firebase Vertex AI / Firebase AI Logic with gemini-2.0-flash
+        // Cloud provider: current Firebase AI Logic using the Gemini Developer API backend
         // Credentials are secure and managed via Firebase project configuration (no hardcoded keys)
-        val geminiProvider = GeminiAIProvider(modelName = "gemini-2.0-flash")
+        val geminiProvider = GeminiAIProvider(modelName = "gemini-3.8-flash")
 
         aiRouter = AIRouter(
             localProvider = mockProvider,
