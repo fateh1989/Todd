@@ -17,8 +17,17 @@ import com.todd.core.remote.AndroidRemoteJobStore
 import com.todd.core.remote.GitHubActionsRemoteExecutor
 import com.todd.core.remote.GitHubActionsRemoteGateway
 import com.todd.core.remote.RemoteExecutor
+import com.todd.core.remote.RemoteJobStatus
+import com.todd.core.model.Project
+import com.todd.core.model.TaskStatus
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
 class ToddApplication : Application() {
+
+    private val appScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     lateinit var database: ToddDatabase
         private set
@@ -65,7 +74,56 @@ class ToddApplication : Application() {
             gateway = GitHubActionsRemoteGateway(
                 tokenProvider = { githubCredentialStore.getToken() }
             ),
-            store = AndroidRemoteJobStore(this)
+            store = AndroidRemoteJobStore(this),
+            onStateChanged = { remoteState ->
+                appScope.launch {
+                    repository.getTaskById(remoteState.jobId)?.let { task ->
+                        val taskStatus = when (remoteState.status) {
+                            RemoteJobStatus.SUBMITTED,
+                            RemoteJobStatus.CONNECTING,
+                            RemoteJobStatus.CLONING_REPO,
+                            RemoteJobStatus.INSPECTING_STATE,
+                            RemoteJobStatus.EDITING_FILES,
+                            RemoteJobStatus.COMMITTING,
+                            RemoteJobStatus.RUNNING_TESTS ->
+                                TaskStatus.IN_PROGRESS
+
+                            RemoteJobStatus.VERIFYING_ARTIFACTS ->
+                                TaskStatus.VERIFYING
+
+                            RemoteJobStatus.COMPLETED ->
+                                TaskStatus.VERIFIED
+
+                            RemoteJobStatus.FAILED ->
+                                TaskStatus.FAILED
+
+                            RemoteJobStatus.BLOCKED ->
+                                TaskStatus.BLOCKED
+
+                            RemoteJobStatus.PAUSED ->
+                                TaskStatus.PAUSED
+
+                            RemoteJobStatus.CANCELLED,
+                            RemoteJobStatus.CANCELLING ->
+                                TaskStatus.CANCELLED
+
+                            else -> task.status
+                        }
+
+                        repository.updateTask(
+                            task.copy(
+                                status = taskStatus,
+                                currentStep = remoteState.currentStepDescription,
+                                lastEvidence = remoteState.providerRunUrl
+                                    ?: remoteState.artifactNames.firstOrNull()
+                                    ?: task.lastEvidence,
+                                failureCause = remoteState.failureMessage,
+                                updatedAt = System.currentTimeMillis()
+                            )
+                        )
+                    }
+                }
+            }
         )
         liveClient = GeminiLiveClient(
             context = this,
@@ -85,6 +143,21 @@ class ToddApplication : Application() {
             localProvider = localProvider,
             cloudProvider = geminiProvider
         )
+
+        appScope.launch {
+            if (repository.getProjectById("todd-main") == null) {
+                repository.saveProject(
+                    Project(
+                        id = "todd-main",
+                        name = "Todd",
+                        description = "Todd Android personal AI agent",
+                        repository = "fateh1989/Todd",
+                        branch = "main",
+                        currentGoal = "Continue building and verifying Todd"
+                    )
+                )
+            }
+        }
     }
 
     companion object {

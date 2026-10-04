@@ -34,6 +34,8 @@ import com.todd.ToddApplication
 import com.todd.core.model.*
 import com.todd.core.ai.GeminiLiveState
 import com.todd.core.ai.LiveTranscriptItem
+import com.todd.core.remote.RemoteExecutionMode
+import com.todd.core.remote.RemoteJobRequest
 import com.todd.service.overlay.FloatingToddService
 import com.todd.service.accessibility.ToddAccessibilityService
 import com.todd.service.screen.ScreenCaptureService
@@ -328,9 +330,68 @@ fun ToddMainScreen(
                                 projectId = projectId,
                                 title = title,
                                 goal = goal,
-                                criteria = "Verified by tool response"
+                                criteria = "GitHub Actions verification must complete with evidence"
                             )
                             app.repository.saveTask(task)
+
+                            if (!app.githubCredentialStore.hasToken()) {
+                                app.repository.updateTask(
+                                    task.copy(
+                                        status = TaskStatus.BLOCKED,
+                                        currentStep = "أضف تفويض GitHub من الإعدادات لتشغيل المهمة البعيدة.",
+                                        updatedAt = System.currentTimeMillis()
+                                    )
+                                )
+                            } else {
+                                val project = app.repository.getProjectById(projectId)
+                                val repoName = project?.repository
+                                    ?: if (projectId == "todd-main") "fateh1989/Todd" else null
+                                val branch = project?.branch?.ifBlank { "main" } ?: "main"
+
+                                if (repoName == null) {
+                                    app.repository.updateTask(
+                                        task.copy(
+                                            status = TaskStatus.BLOCKED,
+                                            currentStep = "لا يوجد مستودع مرتبط بهذا المشروع.",
+                                            updatedAt = System.currentTimeMillis()
+                                        )
+                                    )
+                                } else {
+                                    val info = app.githubTool.getRepositoryInfo(repoName, branch).getOrNull()
+                                    if (info == null) {
+                                        app.repository.updateTask(
+                                            task.copy(
+                                                status = TaskStatus.FAILED,
+                                                currentStep = "تعذر قراءة حالة المستودع.",
+                                                updatedAt = System.currentTimeMillis()
+                                            )
+                                        )
+                                    } else {
+                                        val started = app.remoteExecutor.startJob(
+                                            RemoteJobRequest(
+                                                jobId = task.id,
+                                                projectId = projectId,
+                                                repository = repoName,
+                                                branch = branch,
+                                                startCommit = info.latestCommitSha,
+                                                objective = goal,
+                                                completionCriteria = task.completionCriteria,
+                                                mode = RemoteExecutionMode.VERIFY_ANDROID
+                                            )
+                                        )
+                                        started.exceptionOrNull()?.let { error ->
+                                            app.repository.updateTask(
+                                                task.copy(
+                                                    status = TaskStatus.FAILED,
+                                                    currentStep = error.message ?: "تعذر بدء المهمة البعيدة.",
+                                                    failureCause = error.message,
+                                                    updatedAt = System.currentTimeMillis()
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
                     }
                 )

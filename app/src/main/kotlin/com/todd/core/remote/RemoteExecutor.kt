@@ -133,7 +133,8 @@ class GitHubActionsRemoteExecutor(
     private val gateway: RemoteExecutionGateway,
     private val store: RemoteJobStore,
     private val pollIntervalMs: Long = 7_500L,
-    private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob()),
+    private val onStateChanged: (RemoteJobState) -> Unit = {}
 ) : RemoteExecutor {
 
     private val flows = mutableMapOf<String, MutableStateFlow<RemoteJobState>>()
@@ -261,6 +262,7 @@ class GitHubActionsRemoteExecutor(
     private fun publish(request: RemoteJobRequest, state: RemoteJobState) {
         store.save(StoredRemoteJob(request, state))
         flows.getOrPut(request.jobId) { MutableStateFlow(state) }.value = state
+        onStateChanged(state)
     }
 
     private fun mapSnapshot(
