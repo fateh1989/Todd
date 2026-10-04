@@ -153,7 +153,7 @@ Normal typing has priority over AI. If the AI provider is offline, rate-limited,
 
 Todd actions from the keyboard include Correct, Rewrite, Translate, Reply, Summarize, Explain, Continue, Shorten, Expand, Change tone, Research selected text, Ask Todd, and Send to active project.
 
-The keyboard should use InputConnection APIs to inspect selected text, text before/after cursor, and editable field content where Android permits it. It must respect apps that restrict access. It should not claim to read text that the target app does not expose.
+The keyboard should use InputConnection APIs to inspect selected text, text before/after cursor, and editable field content. If one Android channel does not expose enough context, Todd should automatically combine other enabled context sources such as AccessibilityService, current visual screen capture, notifications, and project memory instead of simply giving up. Todd itself must not add app or content blocklists that reduce the owner's requested screen understanding; only actual platform/API availability limits what can be obtained through a given channel.
 
 When an AI action produces replacement text, the user should be able to preview, replace, insert, or cancel. For low-risk transformations explicitly requested from selected text, an option may allow direct replacement, but safe defaults should preserve control.
 
@@ -193,23 +193,32 @@ Voice transcripts may be stored according to user settings. The default should s
 
 # 10. Screen awareness
 
-Todd should understand the current Android screen when the owner permits it. This capability has two layers: semantic accessibility context and visual capture.
+Screen Awareness is a core Todd capability. When the owner enables it, Todd should understand as much of the current Android screen and surrounding device context as the available Android mechanisms can provide. Todd must not add its own artificial app blocklist, content-category blocklist, or rule that intentionally ignores visible context the owner asked it to understand.
 
-AccessibilityService is the preferred first path. It can provide accessible text, element roles, labels, bounds, and actions. Semantic context is often smaller, more private, and more actionable than an image.
+Todd should combine all useful enabled channels rather than relying on one source:
 
-MediaProjection is the second path. It should be used when a real image is required, such as a canvas, image, inaccessible custom UI, or layout whose meaning depends on visual structure.
+- AccessibilityService for semantic UI text, element roles, labels, bounds, actions, package name, window/class metadata, focused/editable state, and other exposed accessibility structure.
+- MediaProjection for the actual visual screen when semantic accessibility data is incomplete, missing, custom-drawn, image-based, canvas-based, or visually dependent.
+- Visual model analysis for visible text, icons, images, diagrams, layout, colors, state, and relationships that are not represented well by accessibility nodes.
+- OCR as an additional local extraction path when useful, especially for text rendered inside images or custom surfaces.
+- InputConnection while Todd Keyboard is active, including selected text and text around the cursor.
+- Notification access as an additional context source when enabled.
+- Clipboard context when the owner invokes or enables clipboard use.
+- Current app/package/window metadata and active project/task context.
 
-Todd should not start screen capture merely because screen permission was granted in the past. Android's permission model and user expectations require explicit visible session state. The user must know when capture is active.
+These sources should be fused into one current ScreenContext / DeviceContext with timestamps and provenance rather than treated as unrelated fragments.
 
-The agent should combine screen context with the user's question. If the user asks "What does this error mean?" Todd should focus on the visible error instead of uploading unrelated content.
+Fallback behavior is mandatory. If AccessibilityService returns little or no useful text, Todd should continue automatically with the next available path: visual screen capture, OCR where applicable, visual model analysis, keyboard/InputConnection context, notifications, and other enabled context. Failure of one reading method must not be treated as failure of Screen Awareness as a whole.
 
-Cloud privacy rule: do not send a full screen image to a cloud provider if semantic text is sufficient. If a cloud vision model is necessary, send the minimum required crop/context where technically practical.
+For normal chat and keyboard actions, the latest visual frame should be attachable together with semantic context. For Gemini Live or another live multimodal provider, Todd should be able to stream current screen frames while the visual session is active so the model can reason about what is changing on screen during the conversation.
 
-Screen understanding should be exposed as a tool with structured output: app package, window title when available, accessible elements, selected text, captured image reference, and timestamp. The agent can then reason over that structured context.
+Todd should expose screen understanding as structured context including, where available: foreground app/package, window/screen identity, accessible elements, focused/editable element, selected text, semantic text, visual capture reference, OCR text, notification context, capture timestamps, and source/provenance.
 
-Todd should handle inaccessible content honestly. If FLAG_SECURE or application behavior prevents capture, say that the content is not available. Never fabricate unseen screen details.
+There is no Todd-imposed rule that a certain app or content type is "off limits" merely because of its category. Actual Android/OS enforcement remains a technical fact: if the operating system or target application returns no data through a particular API, Todd cannot fabricate it or claim it was observed. In that case Todd should try every other available enabled channel and record which source succeeded or failed.
 
-Potential screen actions through AccessibilityService must be separate from screen reading. Reading permission does not automatically authorize clicking, typing, scrolling, or navigation. Tool permissions should distinguish observe from act.
+Observation and action are separate capabilities. Understanding the screen does not itself mean that Todd should click, type, scroll, submit, purchase, delete, or perform another external action. Actions continue through Todd's task/tool permission and verification system.
+
+The user should have a clear visible indication when continuous visual MediaProjection capture is active, because Android requires a real capture session. The goal of that indicator is state awareness, not to reduce Todd's reading capability.
 
 ---
 
