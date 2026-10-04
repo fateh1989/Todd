@@ -12,6 +12,7 @@ import com.todd.core.state.ToddStateMachine
 import com.todd.core.tools.GitHubRestTool
 import com.todd.core.tools.GitHubTool
 import com.todd.core.tools.GitHubCredentialStore
+import com.todd.core.memory.MemoryLearningEngine
 
 class ToddApplication : Application() {
 
@@ -39,12 +40,16 @@ class ToddApplication : Application() {
     lateinit var liveClient: GeminiLiveClient
         private set
 
+    lateinit var memoryLearningEngine: MemoryLearningEngine
+        private set
+
     override fun onCreate() {
         super.onCreate()
         instance = this
 
         database = ToddDatabase.getDatabase(this)
         repository = ToddRepository(database)
+        memoryLearningEngine = MemoryLearningEngine(repository)
         stateMachine = ToddStateMachine(repository)
         githubCredentialStore = GitHubCredentialStore(this)
         githubTool = GitHubRestTool(tokenProvider = { githubCredentialStore.getToken() })

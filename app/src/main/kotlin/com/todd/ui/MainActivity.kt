@@ -286,6 +286,10 @@ fun ToddMainScreen(
                                         isVerified = true
                                     )
                                 )
+                                app.memoryLearningEngine.learnExplicitInstruction(
+                                    projectId = projectId,
+                                    userMessage = message
+                                )
 
                                 val result = app.aiRouter.route(
                                     com.todd.core.ai.AIRequest(
