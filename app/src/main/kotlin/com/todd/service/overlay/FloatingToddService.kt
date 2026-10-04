@@ -6,24 +6,26 @@ import android.app.NotificationManager
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.IBinder
 import android.view.*
 import android.widget.FrameLayout
+import android.widget.TextView
 import androidx.core.app.NotificationCompat
-import com.todd.R
 import com.todd.ToddApplication
-import com.todd.core.model.ToddGlobalStatus
 
 class FloatingToddService : Service() {
 
     private lateinit var windowManager: WindowManager
     private var overlayView: View? = null
-    private var initialX: Int = 0
-    private var initialY: Int = 0
-    private var initialTouchX: Float = 0f
-    private var initialTouchY: Float = 0f
+    private var overlayParams: WindowManager.LayoutParams? = null
+    private var initialX = 0
+    private var initialY = 0
+    private var initialTouchX = 0f
+    private var initialTouchY = 0f
     private var isDragging = false
     private var dwellStartTime = 0L
 
@@ -33,6 +35,14 @@ class FloatingToddService : Service() {
         super.onCreate()
         startForegroundNotification()
         setupOverlay()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        when (intent?.action) {
+            ACTION_HIDE -> hideOverlayButton()
+            ACTION_SHOW, null -> showOverlayButton()
+        }
+        return START_STICKY
     }
 
     private fun startForegroundNotification() {
@@ -45,19 +55,21 @@ class FloatingToddService : Service() {
             ).apply {
                 description = "Keeps Todd active and provides quick controls"
             }
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
 
         val notification: Notification = NotificationCompat.Builder(this, channelId)
-            .setContentTitle("Todd is standing by")
-            .setContentText("Tap overlay button or keyboard to summon Todd")
+            .setContentTitle("Todd")
+            .setContentText("Todd جاهز")
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setOngoing(true)
             .build()
 
         startForeground(1001, notification)
     }
+
+    private fun dp(value: Int): Int =
+        (value * resources.displayMetrics.density).toInt()
 
     private fun setupOverlay() {
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
@@ -70,8 +82,8 @@ class FloatingToddService : Service() {
         }
 
         val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.WRAP_CONTENT,
-            WindowManager.LayoutParams.WRAP_CONTENT,
+            dp(64),
+            dp(64),
             layoutParamsType,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
@@ -80,26 +92,47 @@ class FloatingToddService : Service() {
             x = 100
             y = 300
         }
+        overlayParams = params
 
         val container = FrameLayout(this)
+        val button = TextView(this).apply {
+            text = "T"
+            gravity = Gravity.CENTER
+            textSize = 24f
+            setTextColor(Color.WHITE)
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+                setColor(Color.rgb(79, 70, 229))
+                setStroke(dp(2), Color.WHITE)
+            }
+            elevation = dp(8).toFloat()
+        }
+        container.addView(
+            button,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+
         overlayView = container
 
-        // Handle drag, edge snap, Hide and Power Off targets
         container.setOnTouchListener { view, event ->
-            when (event.action) {
+            when (event.actionMasked) {
                 MotionEvent.ACTION_DOWN -> {
                     initialX = params.x
                     initialY = params.y
                     initialTouchX = event.rawX
                     initialTouchY = event.rawY
                     isDragging = false
+                    dwellStartTime = 0L
                     true
                 }
+
                 MotionEvent.ACTION_MOVE -> {
                     val dx = (event.rawX - initialTouchX).toInt()
                     val dy = (event.rawY - initialTouchY).toInt()
-
-                    if (Math.abs(dx) > 10 || Math.abs(dy) > 10) {
+                    if (kotlin.math.abs(dx) > 10 || kotlin.math.abs(dy) > 10) {
                         isDragging = true
                     }
 
@@ -108,23 +141,16 @@ class FloatingToddService : Service() {
                         params.y = initialY + dy
                         windowManager.updateViewLayout(view, params)
 
-                        // Check if hovering over bottom targets
                         val screenHeight = resources.displayMetrics.heightPixels
                         val screenWidth = resources.displayMetrics.widthPixels
+                        val inBottomTargetArea = event.rawY > screenHeight - dp(150)
 
-                        if (params.y > screenHeight - 250) {
-                            // Target area!
-                            if (params.x < screenWidth / 2) {
-                                // Hide target zone
-                            } else {
-                                // Power Off target zone (requires dwell)
-                                if (dwellStartTime == 0L) {
-                                    dwellStartTime = System.currentTimeMillis()
-                                } else if (System.currentTimeMillis() - dwellStartTime > 1200) {
-                                    // Dwell reached! Trigger Power Off
-                                    ToddApplication.instance.stateMachine.powerOff()
-                                    stopSelf()
-                                }
+                        if (inBottomTargetArea && event.rawX >= screenWidth / 2f) {
+                            if (dwellStartTime == 0L) {
+                                dwellStartTime = System.currentTimeMillis()
+                            } else if (System.currentTimeMillis() - dwellStartTime >= POWER_DWELL_MS) {
+                                ToddApplication.instance.stateMachine.powerOff()
+                                stopSelf()
                             }
                         } else {
                             dwellStartTime = 0L
@@ -132,46 +158,88 @@ class FloatingToddService : Service() {
                     }
                     true
                 }
-                MotionEvent.ACTION_UP -> {
-                    if (!isDragging) {
-                        // Single tap: open compact panel
+
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    if (!isDragging && event.actionMasked == MotionEvent.ACTION_UP) {
                         openCompactPanel()
-                    } else {
-                        // Edge snap logic
+                    } else if (isDragging) {
+                        val screenHeight = resources.displayMetrics.heightPixels
                         val screenWidth = resources.displayMetrics.widthPixels
-                        params.x = if (params.x < screenWidth / 2) 20 else screenWidth - 140
-                        windowManager.updateViewLayout(view, params)
+                        val droppedInBottomArea = event.rawY > screenHeight - dp(150)
+
+                        if (droppedInBottomArea && event.rawX < screenWidth / 2f) {
+                            hideOverlayButton()
+                        } else {
+                            params.x = if (event.rawX < screenWidth / 2f) {
+                                dp(12)
+                            } else {
+                                screenWidth - dp(76)
+                            }
+                            params.y = params.y.coerceIn(dp(24), screenHeight - dp(100))
+                            try {
+                                windowManager.updateViewLayout(view, params)
+                            } catch (_: Exception) {
+                            }
+                        }
                     }
+
                     dwellStartTime = 0L
                     true
                 }
+
                 else -> false
             }
         }
 
         try {
-            windowManager.addView(overlayView, params)
-        } catch (e: Exception) {
-            e.printStackTrace()
+            windowManager.addView(container, params)
+            ToddApplication.instance.stateMachine.showOverlay()
+        } catch (_: Exception) {
+            overlayView = null
+        }
+    }
+
+    private fun hideOverlayButton() {
+        overlayView?.visibility = View.GONE
+        ToddApplication.instance.stateMachine.hideOverlay()
+    }
+
+    private fun showOverlayButton() {
+        val view = overlayView
+        if (view == null) {
+            setupOverlay()
+        } else {
+            view.visibility = View.VISIBLE
+            ToddApplication.instance.stateMachine.showOverlay()
         }
     }
 
     private fun openCompactPanel() {
-        // Open compact Todd panel or launch MainActivity
         val app = ToddApplication.instance
         if (app.stateMachine.state.value.isPowerOff) {
             app.stateMachine.powerOn()
         }
+
+        val intent = Intent(this, com.todd.ui.MainActivity::class.java).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+        startActivity(intent)
     }
 
     override fun onDestroy() {
-        super.onDestroy()
         overlayView?.let {
             try {
                 windowManager.removeView(it)
-            } catch (e: Exception) {
-                e.printStackTrace()
+            } catch (_: Exception) {
             }
         }
+        overlayView = null
+        super.onDestroy()
+    }
+
+    companion object {
+        const val ACTION_SHOW = "com.todd.action.SHOW_OVERLAY"
+        const val ACTION_HIDE = "com.todd.action.HIDE_OVERLAY"
+        private const val POWER_DWELL_MS = 1200L
     }
 }

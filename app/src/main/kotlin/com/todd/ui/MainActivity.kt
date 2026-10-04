@@ -49,7 +49,7 @@ class MainActivity : ComponentActivity() {
                 return
             }
         }
-        val serviceIntent = Intent(this, FloatingToddService::class.java)
+        val serviceIntent = Intent(this, FloatingToddService::class.java).apply { action = FloatingToddService.ACTION_SHOW }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(serviceIntent)
         } else {
