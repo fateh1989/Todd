@@ -43,10 +43,12 @@ data class LiveToolCall(
 )
 
 class GeminiLiveClient(
-    private val context: Context,
+    private val context: Context?,
     private val rulesEngine: RulesEngine,
-    private val repository: ToddRepository,
-    val liveModelName: String = "gemini-2.0-flash-exp"
+    private val repository: ToddRepository?,
+    val liveModelName: String = "gemini-2.0-flash-exp",
+    private val sessionStarter: (suspend () -> Result<Unit>)? = null,
+    private val textResponder: (suspend (String) -> Result<String>)? = null
 ) {
     private val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
@@ -59,7 +61,7 @@ class GeminiLiveClient(
     private val _isMuted = MutableStateFlow(false)
     val isMuted: StateFlow<Boolean> = _isMuted.asStateFlow()
 
-    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
+    private val audioManager = context?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
     private var audioFocusRequest: AudioFocusRequest? = null
 
     // Audio capture & playback handles
@@ -93,13 +95,17 @@ class GeminiLiveClient(
         requestAudioFocus()
 
         try {
-            // Initialize generative model if needed
-            val model = generativeModel ?: Firebase.vertexAI.generativeModel(modelName = liveModelName).also {
-                generativeModel = it
+            val injectedStarter = sessionStarter
+            if (injectedStarter != null) {
+                injectedStarter().getOrThrow()
+            } else {
+                generativeModel = generativeModel ?: Firebase.vertexAI
+                    .generativeModel(modelName = liveModelName)
             }
 
-            // Real audio hardware initialization (16kHz PCM input, 24kHz PCM output)
-            setupAudioHardware()
+            if (context != null) {
+                setupAudioHardware()
+            }
 
             _state.value = GeminiLiveState.LISTENING
             return@withContext Result.success(true)
@@ -151,16 +157,11 @@ class GeminiLiveClient(
             return@withContext handleToolExecution(toolCall)
         }
 
-        val model = generativeModel
-        if (model == null) {
-            val fallbackMsg = "Firebase Vertex AI model is not configured."
-            _state.value = GeminiLiveState.ERROR
-            return@withContext Result.failure(IllegalStateException(fallbackMsg))
-        }
-
         try {
-            val response = model.generateContent(speechText)
-            val replyText = response.text ?: ""
+            val replyText = textResponder?.invoke(speechText)?.getOrThrow()
+                ?: generativeModel?.generateContent(speechText)?.text
+                ?: throw IllegalStateException("Firebase Vertex AI model is not configured.")
+
             _state.value = GeminiLiveState.SPEAKING
             addTranscript("TODD", replyText)
             Result.success(replyText)

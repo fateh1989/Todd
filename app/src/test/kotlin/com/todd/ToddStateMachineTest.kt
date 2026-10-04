@@ -15,10 +15,7 @@ class ToddStateMachineTest {
 
     @Before
     fun setup() {
-        // Stub repository for testing state machine logic
-        val stubRepo = object : Any() {}
-        @Suppress("UNCHECKED_CAST")
-        stateMachine = ToddStateMachine(stubRepo as ToddRepository)
+        stateMachine = ToddStateMachine()
     }
 
     @Test

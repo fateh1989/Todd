@@ -1,11 +1,9 @@
 package com.todd
 
-import android.content.Context
 import com.todd.core.ai.GeminiLiveClient
 import com.todd.core.ai.GeminiLiveState
 import com.todd.core.model.AIProviderMode
 import com.todd.core.rules.RulesEngine
-import com.todd.data.repository.ToddRepository
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Before
@@ -18,16 +16,15 @@ class GeminiLiveVoiceTest {
 
     @Before
     fun setup() {
-        val mockContext = object : Any() {}
-        val mockRepo = object : Any() {}
         rulesEngine = RulesEngine()
 
-        @Suppress("UNCHECKED_CAST")
         liveClient = GeminiLiveClient(
-            context = mockContext as Context,
+            context = null,
             rulesEngine = rulesEngine,
-            repository = mockRepo as ToddRepository,
-            liveModelName = "gemini-2.0-flash-exp"
+            repository = null,
+            liveModelName = "gemini-2.0-flash-exp",
+            sessionStarter = { Result.success(Unit) },
+            textResponder = { prompt -> Result.success("Todd reply: $prompt") }
         )
     }
 
@@ -54,11 +51,9 @@ class GeminiLiveVoiceTest {
     @Test
     fun `barge-in immediately stops speaking state and resumes listening`() = runBlocking {
         liveClient.startSession(AIProviderMode.CLOUD_PREFERRED)
-        // Simulate user speech
         liveClient.onUserSpeechReceived("مرحباً يا تود")
         assertEquals(GeminiLiveState.SPEAKING, liveClient.state.value)
 
-        // Trigger barge-in (user interrupted Todd)
         liveClient.handleBargeIn()
         assertEquals(GeminiLiveState.LISTENING, liveClient.state.value)
     }
@@ -67,12 +62,10 @@ class GeminiLiveVoiceTest {
     fun `voice function calling passes through RulesEngine safely`() = runBlocking {
         liveClient.startSession(AIProviderMode.CLOUD_PREFERRED)
 
-        // Safe tool: check repository status
         liveClient.onUserSpeechReceived("تود، قم بفحص المستودع")
         val transcript = liveClient.transcripts.value.lastOrNull()?.text ?: ""
         assertTrue("Safe tool execution succeeds and reports result", transcript.contains("تم تنفيذ أداة checkRepositoryStatus"))
 
-        // Dangerous tool: delete branch
         liveClient.onUserSpeechReceived("تود، احذف الفرع main")
         val blockedTranscript = liveClient.transcripts.value.lastOrNull()?.text ?: ""
         assertTrue("Dangerous tool is stopped with security prompt", blockedTranscript.contains("تنبيه أمان") || blockedTranscript.contains("عالية الخطورة"))

@@ -8,7 +8,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 
 class ToddStateMachine(
-    private val repository: ToddRepository
+    private val repository: ToddRepository? = null
 ) {
     private val _state = MutableStateFlow(ToddState())
     val state: StateFlow<ToddState> = _state.asStateFlow()
