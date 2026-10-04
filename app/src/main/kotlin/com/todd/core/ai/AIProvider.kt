@@ -37,7 +37,7 @@ data class AISource(
 data class AIResponse(
     val text: String,
     val providerUsed: ProviderType,
-    val isVerified: Boolean = true,
+    val isVerified: Boolean = false,
     val tokensUsed: Int = 0,
     val latencyMs: Long = 0,
     val sources: List<AISource> = emptyList()
