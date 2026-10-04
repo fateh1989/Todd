@@ -11,7 +11,7 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 class GeminiAIProvider(
-    private val modelName: String = "gemini-3.5-flash-lite"
+    private val modelName: String = "gemini-3.8-flash"
 ) : AIProvider {
 
     override val type: ProviderType = ProviderType.CLOUD_GEMINI
