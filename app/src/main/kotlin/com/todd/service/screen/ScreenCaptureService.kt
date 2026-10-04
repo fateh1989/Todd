@@ -64,6 +64,7 @@ class ScreenCaptureService : Service() {
     private var workerThread: HandlerThread? = null
     private var workerHandler: Handler? = null
     private var lastCaptureAt: Long = 0L
+    private var lastOcrAt: Long = 0L
 
     private val projectionCallback = object : MediaProjection.Callback() {
         override fun onStop() {
@@ -174,9 +175,17 @@ class ScreenCaptureService : Service() {
                 FileOutputStream(target).use { output ->
                     cropped.compress(Bitmap.CompressFormat.PNG, 90, output)
                 }
-                cropped.recycle()
 
                 ScreenCaptureStore.update(target, width, height, now)
+
+                if (now - lastOcrAt >= OCR_INTERVAL_MS) {
+                    lastOcrAt = now
+                    ScreenOcrProcessor.process(cropped, now) {
+                        if (!cropped.isRecycled) cropped.recycle()
+                    }
+                } else {
+                    cropped.recycle()
+                }
             } finally {
                 image.close()
             }
