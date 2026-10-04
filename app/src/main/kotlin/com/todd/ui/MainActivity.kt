@@ -1,11 +1,14 @@
 package com.todd.ui
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import androidx.activity.ComponentActivity
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -22,13 +25,22 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.todd.ToddApplication
 import com.todd.core.model.*
+import com.todd.core.ai.GeminiLiveState
+import com.todd.core.ai.LiveTranscriptItem
 import com.todd.service.overlay.FloatingToddService
 import com.todd.service.accessibility.ToddAccessibilityService
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+
+    private val microphonePermissionLauncher =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+            if (granted) startVoiceSession()
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -37,9 +49,33 @@ class MainActivity : ComponentActivity() {
                 onStartOverlay = { checkOverlayPermissionAndStart() },
                 onOpenAccessibility = {
                     startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-                }
+                },
+                onStartVoice = { requestOrStartVoice() },
+                onStopVoice = { stopVoiceSession() }
             )
         }
+    }
+
+    private fun requestOrStartVoice() {
+        if (
+            ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+                PackageManager.PERMISSION_GRANTED
+        ) {
+            startVoiceSession()
+        } else {
+            microphonePermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+        }
+    }
+
+    private fun startVoiceSession() {
+        lifecycleScope.launch {
+            val app = ToddApplication.instance
+            app.liveClient.startSession(app.stateMachine.state.value.aiMode)
+        }
+    }
+
+    private fun stopVoiceSession() {
+        ToddApplication.instance.liveClient.endSession()
     }
 
     private fun checkOverlayPermissionAndStart() {
@@ -66,11 +102,16 @@ class MainActivity : ComponentActivity() {
 @Composable
 fun ToddMainScreen(
     onStartOverlay: () -> Unit,
-    onOpenAccessibility: () -> Unit
+    onOpenAccessibility: () -> Unit,
+    onStartVoice: () -> Unit,
+    onStopVoice: () -> Unit
 ) {
     val app = ToddApplication.instance
     val stateMachine = app.stateMachine
     val state by stateMachine.state.collectAsState()
+    val liveState by app.liveClient.state.collectAsState()
+    val liveTranscripts by app.liveClient.transcripts.collectAsState()
+    val liveMuted by app.liveClient.isMuted.collectAsState()
     val scope = rememberCoroutineScope()
 
     var selectedTab by remember { mutableStateOf(0) }
@@ -180,6 +221,17 @@ fun ToddMainScreen(
                     state = state,
                     messages = chatMessages,
                     isBusy = isChatBusy,
+                    voiceState = liveState,
+                    voiceTranscripts = liveTranscripts,
+                    voiceMuted = liveMuted,
+                    onToggleVoice = {
+                        if (liveState == GeminiLiveState.DISCONNECTED || liveState == GeminiLiveState.ERROR) {
+                            onStartVoice()
+                        } else {
+                            onStopVoice()
+                        }
+                    },
+                    onToggleVoiceMute = { app.liveClient.toggleMute() },
                     onSendMessage = { message ->
                         if (message.isNotBlank() && !isChatBusy) {
                             scope.launch {
@@ -321,12 +373,26 @@ fun HomeDashboard(
     state: ToddState,
     messages: List<MemoryEntry>,
     isBusy: Boolean,
+    voiceState: GeminiLiveState,
+    voiceTranscripts: List<LiveTranscriptItem>,
+    voiceMuted: Boolean,
+    onToggleVoice: () -> Unit,
+    onToggleVoiceMute: () -> Unit,
     onSendMessage: (String) -> Unit,
     onTaskAction: (String, String) -> Unit
 ) {
     var quickInput by remember { mutableStateOf("") }
 
     Column(modifier = Modifier.fillMaxSize()) {
+        VoiceConversationCard(
+            state = voiceState,
+            transcripts = voiceTranscripts,
+            muted = voiceMuted,
+            onToggle = onToggleVoice,
+            onToggleMute = onToggleVoiceMute
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
         Text("محادثة Todd", fontWeight = FontWeight.Bold, color = Color.White)
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -408,6 +474,80 @@ fun HomeDashboard(
                 Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(modifier = Modifier.width(6.dp))
                 Text("إرسال")
+            }
+        }
+    }
+}
+
+@Composable
+fun VoiceConversationCard(
+    state: GeminiLiveState,
+    transcripts: List<LiveTranscriptItem>,
+    muted: Boolean,
+    onToggle: () -> Unit,
+    onToggleMute: () -> Unit
+) {
+    val active = state != GeminiLiveState.DISCONNECTED && state != GeminiLiveState.ERROR
+    val stateLabel = when (state) {
+        GeminiLiveState.DISCONNECTED -> "غير متصل"
+        GeminiLiveState.CONNECTING -> "جارِ الاتصال"
+        GeminiLiveState.LISTENING -> "يستمع"
+        GeminiLiveState.THINKING -> "يفكر"
+        GeminiLiveState.SPEAKING -> "يتحدث"
+        GeminiLiveState.RECONNECTING -> "يعيد الاتصال"
+        GeminiLiveState.ERROR -> "خطأ في الاتصال"
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column {
+                    Text("المحادثة الصوتية المباشرة", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text(stateLabel, color = Color(0xFF94A3B8), fontSize = 12.sp)
+                }
+
+                Row {
+                    if (active) {
+                        IconButton(onClick = onToggleMute) {
+                            Icon(
+                                if (muted) Icons.Default.MicOff else Icons.Default.Mic,
+                                contentDescription = "Mute",
+                                tint = if (muted) Color(0xFFF59E0B) else Color.White
+                            )
+                        }
+                    }
+                    Button(
+                        onClick = onToggle,
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = if (active) Color(0xFFB91C1C) else Color(0xFF4F46E5)
+                        )
+                    ) {
+                        Icon(
+                            if (active) Icons.Default.Stop else Icons.Default.Mic,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(if (active) "إيقاف" else "تحدث مع Todd")
+                    }
+                }
+            }
+
+            transcripts.takeLast(3).forEach { item ->
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = "${if (item.sender == "USER") "أنت" else "Todd"}: ${item.text}",
+                    color = Color(0xFFCBD5E1),
+                    fontSize = 12.sp
+                )
             }
         }
     }

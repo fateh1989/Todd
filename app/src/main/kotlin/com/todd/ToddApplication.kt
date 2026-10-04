@@ -6,6 +6,8 @@ import com.todd.data.repository.ToddRepository
 import com.todd.core.ai.AIRouter
 import com.todd.core.ai.MockAIProvider
 import com.todd.core.ai.GeminiAIProvider
+import com.todd.core.ai.GeminiLiveClient
+import com.todd.core.rules.RulesEngine
 import com.todd.core.state.ToddStateMachine
 import com.todd.core.tools.GitHubRestTool
 import com.todd.core.tools.GitHubTool
@@ -27,6 +29,12 @@ class ToddApplication : Application() {
     lateinit var githubTool: GitHubTool
         private set
 
+    lateinit var rulesEngine: RulesEngine
+        private set
+
+    lateinit var liveClient: GeminiLiveClient
+        private set
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -35,6 +43,13 @@ class ToddApplication : Application() {
         repository = ToddRepository(database)
         stateMachine = ToddStateMachine(repository)
         githubTool = GitHubRestTool()
+        rulesEngine = RulesEngine()
+        liveClient = GeminiLiveClient(
+            context = this,
+            rulesEngine = rulesEngine,
+            repository = repository,
+            githubTool = githubTool
+        )
 
         // Local provider: deterministic, offline-first
         val mockProvider = MockAIProvider()
