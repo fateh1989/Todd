@@ -13,6 +13,10 @@ import com.todd.core.tools.GitHubRestTool
 import com.todd.core.tools.GitHubTool
 import com.todd.core.tools.GitHubCredentialStore
 import com.todd.core.memory.MemoryLearningEngine
+import com.todd.core.remote.AndroidRemoteJobStore
+import com.todd.core.remote.GitHubActionsRemoteExecutor
+import com.todd.core.remote.GitHubActionsRemoteGateway
+import com.todd.core.remote.RemoteExecutor
 
 class ToddApplication : Application() {
 
@@ -43,6 +47,9 @@ class ToddApplication : Application() {
     lateinit var memoryLearningEngine: MemoryLearningEngine
         private set
 
+    lateinit var remoteExecutor: RemoteExecutor
+        private set
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -54,6 +61,12 @@ class ToddApplication : Application() {
         githubCredentialStore = GitHubCredentialStore(this)
         githubTool = GitHubRestTool(tokenProvider = { githubCredentialStore.getToken() })
         rulesEngine = RulesEngine()
+        remoteExecutor = GitHubActionsRemoteExecutor(
+            gateway = GitHubActionsRemoteGateway(
+                tokenProvider = { githubCredentialStore.getToken() }
+            ),
+            store = AndroidRemoteJobStore(this)
+        )
         liveClient = GeminiLiveClient(
             context = this,
             rulesEngine = rulesEngine,

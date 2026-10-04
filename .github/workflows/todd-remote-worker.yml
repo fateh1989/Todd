@@ -1,0 +1,197 @@
+name: Todd Remote Worker
+run-name: Todd Remote ${{ inputs.job_id }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: Todd remote job ID
+        required: true
+        type: string
+      repository:
+        description: Target repository in owner/name format
+        required: true
+        type: string
+      branch:
+        description: Target branch
+        required: true
+        default: main
+        type: string
+      start_commit:
+        description: Exact commit expected before remote verification
+        required: false
+        default: ""
+        type: string
+      objective:
+        description: Human-readable objective
+        required: false
+        default: ""
+        type: string
+      completion_criteria:
+        description: Human-readable completion criteria
+        required: false
+        default: ""
+        type: string
+      mode:
+        description: inspect, test, build, or verify_android
+        required: true
+        default: verify_android
+        type: choice
+        options:
+          - inspect
+          - test
+          - build
+          - verify_android
+      timeout_minutes:
+        description: Requested timeout in minutes
+        required: false
+        default: "120"
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  remote:
+    name: Todd Remote Execution
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout target repository
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.repository }}
+          ref: ${{ inputs.branch }}
+          fetch-depth: 1
+          token: ${{ secrets.TODD_REMOTE_REPO_TOKEN || github.token }}
+
+      - name: Verify requested start commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p .todd-remote
+          ACTUAL_COMMIT="$(git rev-parse HEAD)"
+          printf '%s\n' "$ACTUAL_COMMIT" > .todd-remote/actual_commit.txt
+          printf '%s\n' "${{ inputs.start_commit }}" > .todd-remote/requested_commit.txt
+
+          if [ -n "${{ inputs.start_commit }}" ] && [ "$ACTUAL_COMMIT" != "${{ inputs.start_commit }}" ]; then
+            echo "ERROR: remote workspace commit $ACTUAL_COMMIT does not match requested start commit ${{ inputs.start_commit }}"
+            exit 42
+          fi
+
+          {
+            echo "job_id=${{ inputs.job_id }}"
+            echo "repository=${{ inputs.repository }}"
+            echo "branch=${{ inputs.branch }}"
+            echo "commit=$ACTUAL_COMMIT"
+            echo "mode=${{ inputs.mode }}"
+            echo "objective=${{ inputs.objective }}"
+            echo "completion_criteria=${{ inputs.completion_criteria }}"
+          } > .todd-remote/job.txt
+
+      - name: Configure Android Google Services when needed
+        shell: bash
+        env:
+          GOOGLE_SERVICES_JSON: ${{ secrets.GOOGLE_SERVICES_JSON }}
+        run: |
+          set -euo pipefail
+          if [ -d app ] && [ ! -f app/google-services.json ]; then
+            if [ -n "$GOOGLE_SERVICES_JSON" ]; then
+              printf '%s' "$GOOGLE_SERVICES_JSON" > app/google-services.json
+            else
+              cat > app/google-services.json <<'EOF'
+          {
+            "project_info": {
+              "project_number": "000000000000",
+              "project_id": "todd-remote-ci",
+              "storage_bucket": "todd-remote-ci.appspot.com"
+            },
+            "client": [{
+              "client_info": {
+                "mobilesdk_app_id": "1:000000000000:android:0000000000000000000000",
+                "android_client_info": {"package_name": "com.todd"}
+              },
+              "oauth_client": [],
+              "api_key": [{"current_key": "AIzaSyRemoteBuildDummyKey000000000000000"}],
+              "services": {"appinvite_service": {"other_platform_oauth_client": []}}
+            }],
+            "configuration_version": "1"
+          }
+          EOF
+            fi
+          fi
+
+      - name: Inspect remote workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "### git status"
+            git status --short --branch
+            echo
+            echo "### root files"
+            find . -maxdepth 2 -type f | sort | head -300
+          } | tee .todd-remote/inspection.log
+
+      - name: Run remote task
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          case "$MODE" in
+            inspect)
+              echo "Inspection-only job completed." | tee .todd-remote/execution.log
+              ;;
+            test)
+              test -f ./gradlew || { echo "ERROR: gradlew not found"; exit 20; }
+              chmod +x ./gradlew
+              ./gradlew testDebugUnitTest --no-daemon 2>&1 | tee .todd-remote/execution.log
+              ;;
+            build)
+              test -f ./gradlew || { echo "ERROR: gradlew not found"; exit 20; }
+              chmod +x ./gradlew
+              ./gradlew assembleDebug --no-daemon 2>&1 | tee .todd-remote/execution.log
+              ;;
+            verify_android)
+              test -f ./gradlew || { echo "ERROR: gradlew not found"; exit 20; }
+              chmod +x ./gradlew
+              {
+                ./gradlew testDebugUnitTest --no-daemon
+                ./gradlew assembleDebug --no-daemon
+              } 2>&1 | tee .todd-remote/execution.log
+              ;;
+            *)
+              echo "ERROR: unsupported remote mode: $MODE"
+              exit 21
+              ;;
+          esac
+
+      - name: Collect remote evidence
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          mkdir -p .todd-remote
+          {
+            echo "final_commit=$(git rev-parse HEAD 2>/dev/null)"
+            echo "finished_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "repository=${{ inputs.repository }}"
+            echo "branch=${{ inputs.branch }}"
+            echo "mode=${{ inputs.mode }}"
+          } > .todd-remote/final-state.txt
+
+          find . -path "*/build/outputs/apk/*.apk" -o -path "*/build/outputs/apk/*/*.apk"             | sort > .todd-remote/apk-files.txt
+
+      - name: Upload remote evidence and artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: todd-remote-${{ inputs.job_id }}
+          path: |
+            .todd-remote/**
+            **/build/outputs/apk/**/*.apk
+          if-no-files-found: error
+          retention-days: 7
