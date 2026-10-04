@@ -102,6 +102,15 @@ class GeminiLiveClient(
             )
         }
 
+        if (sessionStarter == null && !FirebaseRuntimeConfig.current().configured) {
+            _state.value = GeminiLiveState.ERROR
+            return@withContext Result.failure(
+                IllegalStateException(
+                    "Firebase cloud AI is not configured for runtime use. Install a build made with the real Firebase configuration."
+                )
+            )
+        }
+
         _state.value = GeminiLiveState.CONNECTING
         requestAudioFocus()
 
