@@ -2,11 +2,13 @@ package com.todd.ui
 
 import android.Manifest
 import android.content.Intent
+import android.content.Context
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.media.projection.MediaProjectionManager
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
@@ -33,6 +35,8 @@ import com.todd.core.ai.GeminiLiveState
 import com.todd.core.ai.LiveTranscriptItem
 import com.todd.service.overlay.FloatingToddService
 import com.todd.service.accessibility.ToddAccessibilityService
+import com.todd.service.screen.ScreenCaptureService
+import com.todd.service.screen.ScreenCaptureStore
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -40,6 +44,19 @@ class MainActivity : ComponentActivity() {
     private val microphonePermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) startVoiceSession()
+        }
+
+    private val screenCaptureLauncher =
+        registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+            val data = result.data
+            if (result.resultCode == RESULT_OK && data != null) {
+                val serviceIntent = Intent(this, ScreenCaptureService::class.java).apply {
+                    action = ScreenCaptureService.ACTION_START
+                    putExtra(ScreenCaptureService.EXTRA_RESULT_CODE, result.resultCode)
+                    putExtra(ScreenCaptureService.EXTRA_RESULT_DATA, data)
+                }
+                ContextCompat.startForegroundService(this, serviceIntent)
+            }
         }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -51,9 +68,24 @@ class MainActivity : ComponentActivity() {
                     startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
                 },
                 onStartVoice = { requestOrStartVoice() },
-                onStopVoice = { stopVoiceSession() }
+                onStopVoice = { stopVoiceSession() },
+                onStartVisualScreen = { requestVisualScreenCapture() },
+                onStopVisualScreen = { stopVisualScreenCapture() }
             )
         }
+    }
+
+    private fun requestVisualScreenCapture() {
+        val manager =
+            getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        screenCaptureLauncher.launch(manager.createScreenCaptureIntent())
+    }
+
+    private fun stopVisualScreenCapture() {
+        val intent = Intent(this, ScreenCaptureService::class.java).apply {
+            action = ScreenCaptureService.ACTION_STOP
+        }
+        startService(intent)
     }
 
     private fun requestOrStartVoice() {
@@ -104,7 +136,9 @@ fun ToddMainScreen(
     onStartOverlay: () -> Unit,
     onOpenAccessibility: () -> Unit,
     onStartVoice: () -> Unit,
-    onStopVoice: () -> Unit
+    onStopVoice: () -> Unit,
+    onStartVisualScreen: () -> Unit,
+    onStopVisualScreen: () -> Unit
 ) {
     val app = ToddApplication.instance
     val stateMachine = app.stateMachine
@@ -112,6 +146,7 @@ fun ToddMainScreen(
     val liveState by app.liveClient.state.collectAsState()
     val liveTranscripts by app.liveClient.transcripts.collectAsState()
     val liveMuted by app.liveClient.isMuted.collectAsState()
+    val visualScreen by ScreenCaptureStore.state.collectAsState()
     val scope = rememberCoroutineScope()
 
     var selectedTab by remember { mutableStateOf(0) }
@@ -297,8 +332,12 @@ fun ToddMainScreen(
                 2 -> ActivityView(tasks)
                 3 -> SettingsView(
                     state = state,
+                    visualScreenRunning = visualScreen.isRunning,
+                    lastVisualCaptureAt = visualScreen.capturedAt,
                     onAIModeChange = { mode -> stateMachine.setAIMode(mode) },
-                    onOpenAccessibility = onOpenAccessibility
+                    onOpenAccessibility = onOpenAccessibility,
+                    onStartVisualScreen = onStartVisualScreen,
+                    onStopVisualScreen = onStopVisualScreen
                 )
             }
         }
@@ -609,8 +648,12 @@ fun ActivityView(tasks: List<Task>) {
 @Composable
 fun SettingsView(
     state: ToddState,
+    visualScreenRunning: Boolean,
+    lastVisualCaptureAt: Long,
     onAIModeChange: (AIProviderMode) -> Unit,
-    onOpenAccessibility: () -> Unit
+    onOpenAccessibility: () -> Unit,
+    onStartVisualScreen: () -> Unit,
+    onStopVisualScreen: () -> Unit
 ) {
     Column {
         Text("وضع توجيه الذكاء الاصطناعي (AI Routing)", fontWeight = FontWeight.Bold, color = Color.White)
@@ -647,6 +690,34 @@ fun SettingsView(
             Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(6.dp))
             Text("فتح إعدادات فهم الشاشة")
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+        Text("الرؤية البصرية", fontWeight = FontWeight.Bold, color = Color.White)
+        Text(
+            if (visualScreenRunning) {
+                "التقاط صورة الشاشة مستمر الآن" +
+                    if (lastVisualCaptureAt > 0L) " • آخر لقطة محفوظة" else ""
+            } else {
+                "يمكن لـTodd التقاط الشاشة بصرياً ودمجها مع عناصر إمكانية الوصول."
+            },
+            fontSize = 12.sp,
+            color = Color(0xFF94A3B8)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = if (visualScreenRunning) onStopVisualScreen else onStartVisualScreen,
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (visualScreenRunning) Color(0xFFB91C1C) else Color(0xFF4F46E5)
+            )
+        ) {
+            Icon(
+                if (visualScreenRunning) Icons.Default.Stop else Icons.Default.ScreenshotMonitor,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(if (visualScreenRunning) "إيقاف الرؤية البصرية" else "تشغيل الرؤية البصرية")
         }
     }
 }
