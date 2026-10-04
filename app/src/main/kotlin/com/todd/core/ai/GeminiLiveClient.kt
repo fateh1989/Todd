@@ -4,7 +4,7 @@ import android.content.Context
 import android.media.*
 import android.os.Build
 import com.google.firebase.Firebase
-import com.google.firebase.vertexai.type.GenerativeModel
+import com.google.firebase.vertexai.GenerativeModel
 import com.google.firebase.vertexai.vertexAI
 import com.todd.core.model.AIProviderMode
 import com.todd.core.rules.ActionCategory

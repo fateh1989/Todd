@@ -1,7 +1,7 @@
 package com.todd.core.ai
 
 import com.google.firebase.Firebase
-import com.google.firebase.vertexai.type.GenerativeModel
+import com.google.firebase.vertexai.GenerativeModel
 import com.google.firebase.vertexai.vertexAI
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -33,7 +33,6 @@ class GeminiAIProvider(
     }
 
     override suspend fun isAvailable(): Boolean {
-        // Only available if Firebase Vertex AI has been successfully initialized
         return generativeModel != null
     }
 
@@ -45,7 +44,6 @@ class GeminiAIProvider(
 
         val start = System.currentTimeMillis()
 
-        // Build comprehensive context with system, project, screen, and selected text
         val contextPrompt = buildString {
             request.systemPrompt?.let { appendLine("System: $it\n") }
             request.projectContext?.let { appendLine("Project Context: $it\n") }
@@ -59,7 +57,6 @@ class GeminiAIProvider(
             val responseText = response.text
                 ?: return@withContext Result.failure(IllegalStateException("Gemini returned empty content"))
 
-            // Rule: EXECUTED != VERIFIED. Do not set isVerified=true automatically just because text was returned!
             Result.success(
                 AIResponse(
                     text = responseText,
