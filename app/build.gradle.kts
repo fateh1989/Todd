@@ -70,6 +70,7 @@ dependencies {
     // Firebase AI Logic and App Check
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.ai)
+    implementation(libs.firebase.ai.ondevice)
     implementation(libs.firebase.appcheck)
 
     // Local OCR fallback for text rendered inside images/custom UI.
