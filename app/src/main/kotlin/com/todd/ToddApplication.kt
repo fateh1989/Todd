@@ -7,6 +7,8 @@ import com.todd.core.ai.AIRouter
 import com.todd.core.ai.LocalOnDeviceAIProvider
 import com.todd.core.ai.GeminiAIProvider
 import com.todd.core.ai.GeminiLiveClient
+import com.todd.core.ai.FirebaseRuntimeCredentialStore
+import com.todd.core.ai.FirebaseRuntimeConfig
 import com.todd.core.rules.RulesEngine
 import com.todd.core.state.ToddStateMachine
 import com.todd.core.tools.GitHubRestTool
@@ -52,6 +54,9 @@ class ToddApplication : Application() {
     lateinit var githubCredentialStore: GitHubCredentialStore
         private set
 
+    lateinit var firebaseRuntimeCredentialStore: FirebaseRuntimeCredentialStore
+        private set
+
     lateinit var rulesEngine: RulesEngine
         private set
 
@@ -82,6 +87,10 @@ class ToddApplication : Application() {
         memoryLearningEngine = MemoryLearningEngine(repository)
         stateMachine = ToddStateMachine(repository)
         githubCredentialStore = GitHubCredentialStore(this)
+        firebaseRuntimeCredentialStore = FirebaseRuntimeCredentialStore(this)
+        runCatching {
+            FirebaseRuntimeConfig.applyStored(this, firebaseRuntimeCredentialStore)
+        }
         githubTool = GitHubRestTool(tokenProvider = { githubCredentialStore.getToken() })
         autonomousCheckpointStore = AndroidAutonomousCheckpointStore(this)
         rulesEngine = RulesEngine()

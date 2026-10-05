@@ -131,7 +131,7 @@ class GeminiLiveClient(
                     outputAudioTranscription = AudioTranscriptionConfig()
                 }
 
-                val liveModel = Firebase.ai(backend = GenerativeBackend.googleAI())
+                val liveModel = Firebase.ai(app = FirebaseRuntimeConfig.requireConfiguredApp(), backend = GenerativeBackend.googleAI())
                     .liveModel(
                         modelName = liveModelName,
                         generationConfig = generationConfig,

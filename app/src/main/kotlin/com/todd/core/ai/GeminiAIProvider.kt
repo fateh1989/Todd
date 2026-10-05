@@ -26,17 +26,18 @@ class GeminiAIProvider(
         isLocal = false
     )
 
-    private val generativeModel by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
-        Firebase.ai(backend = GenerativeBackend.googleAI())
-            .generativeModel(
-                modelName = modelName,
-                tools = listOf(Tool.googleSearch())
-            )
-    }
+    private fun createModel() =
+        Firebase.ai(
+            app = FirebaseRuntimeConfig.requireConfiguredApp(),
+            backend = GenerativeBackend.googleAI()
+        ).generativeModel(
+            modelName = modelName,
+            tools = listOf(Tool.googleSearch())
+        )
 
     override suspend fun isAvailable(): Boolean {
         if (!FirebaseRuntimeConfig.current().configured) return false
-        return runCatching { generativeModel }.isSuccess
+        return runCatching { createModel() }.isSuccess
     }
 
     override suspend fun generateText(request: AIRequest): Result<AIResponse> = withContext(Dispatchers.IO) {
@@ -61,6 +62,7 @@ class GeminiAIProvider(
         }
 
         try {
+            val generativeModel = createModel()
             val imagePath = request.screenImagePath
             val response = if (!imagePath.isNullOrBlank()) {
                 val imageFile = File(imagePath)

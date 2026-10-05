@@ -173,7 +173,7 @@ fun ToddMainScreen(
     var isChatBusy by remember { mutableStateOf(false) }
     var localAIStatus by remember { mutableStateOf("لم يتم فحص النموذج المحلي بعد") }
     var localAIBusy by remember { mutableStateOf(false) }
-    val firebaseRuntimeStatus = remember { FirebaseRuntimeConfig.current() }
+    var firebaseRuntimeStatus by remember { mutableStateOf(FirebaseRuntimeConfig.current()) }
 
     Scaffold(
         topBar = {
@@ -516,6 +516,27 @@ fun ToddMainScreen(
                             }
                             localAIBusy = false
                         }
+                    },
+                    onSaveFirebaseConfig = { rawJson ->
+                        val result = runCatching {
+                            val credentials =
+                                app.firebaseRuntimeCredentialStore.saveGoogleServicesJson(rawJson)
+                            FirebaseRuntimeConfig.configure(app, credentials)
+                        }
+                        firebaseRuntimeStatus = result.getOrElse { error ->
+                            FirebaseRuntimeConfig.current().copy(
+                                configured = false,
+                                reason = error.message ?: "تعذر حفظ إعداد Firebase."
+                            )
+                        }
+                        if (result.isSuccess) {
+                            app.autonomousTaskCoordinator.resumePending()
+                        }
+                    },
+                    onClearFirebaseConfig = {
+                        app.firebaseRuntimeCredentialStore.clear()
+                        FirebaseRuntimeConfig.clearRuntimeApp()
+                        firebaseRuntimeStatus = FirebaseRuntimeConfig.current()
                     },
                     onSaveGitHubToken = { token ->
                         app.githubCredentialStore.saveToken(token)
@@ -927,6 +948,8 @@ fun SettingsView(
     localAIBusy: Boolean,
     onCheckLocalAI: () -> Unit,
     onPrepareLocalAI: () -> Unit,
+    onSaveFirebaseConfig: (String) -> Unit,
+    onClearFirebaseConfig: () -> Unit,
     onSaveGitHubToken: (String) -> Unit,
     onClearGitHubToken: () -> Unit,
     onAIModeChange: (AIProviderMode) -> Unit,
@@ -936,6 +959,7 @@ fun SettingsView(
     onStopVisualScreen: () -> Unit
 ) {
     var githubToken by remember { mutableStateOf("") }
+    var firebaseConfigJson by remember { mutableStateOf("") }
 
     Column {
         Text("وضع توجيه الذكاء الاصطناعي (AI Routing)", fontWeight = FontWeight.Bold, color = Color.White)
@@ -973,7 +997,43 @@ fun SettingsView(
             fontSize = 12.sp,
             color = if (firebaseConfigured) Color(0xFF10B981) else Color(0xFFF59E0B)
         )
-        Spacer(modifier = Modifier.height(6.dp))
+
+        Spacer(modifier = Modifier.height(8.dp))
+        if (!firebaseConfigured) {
+            Text(
+                "يمكنك لصق محتوى google-services.json الحقيقي هنا مرة واحدة. يحفظ Todd بيانات الاتصال مشفّرة داخل Android Keystore، ولا تحتاج إلى إعادة بناء APK.",
+                fontSize = 12.sp,
+                color = Color(0xFF94A3B8)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            OutlinedTextField(
+                value = firebaseConfigJson,
+                onValueChange = { firebaseConfigJson = it },
+                label = { Text("إعداد Firebase (google-services.json)") },
+                minLines = 3,
+                maxLines = 6,
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    if (firebaseConfigJson.isNotBlank()) {
+                        onSaveFirebaseConfig(firebaseConfigJson)
+                        firebaseConfigJson = ""
+                    }
+                },
+                enabled = firebaseConfigJson.isNotBlank()
+            ) {
+                Text("حفظ وتشغيل الذكاء السحابي")
+            }
+        } else {
+            OutlinedButton(onClick = onClearFirebaseConfig) {
+                Text("مسح إعداد Firebase المحلي")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
         Text(
             "الذكاء المحلي: $localAIStatus",
             fontSize = 12.sp,
