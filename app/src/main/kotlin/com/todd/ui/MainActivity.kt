@@ -30,6 +30,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
@@ -241,6 +243,8 @@ fun ToddMainScreen(
     var firebaseRuntimeStatus by remember { mutableStateOf(FirebaseRuntimeConfig.current()) }
     var geminiApiKeyConfigured by remember { mutableStateOf(app.geminiApiKeyStore.hasKey()) }
     var selectedGeminiModel by remember { mutableStateOf(app.geminiModelPreferenceStore.get()) }
+    val density = LocalDensity.current
+    val imeVisible = WindowInsets.ime.getBottom(density) > 0
 
     Scaffold(
         topBar = {
@@ -292,7 +296,8 @@ fun ToddMainScreen(
             )
         },
         bottomBar = {
-            NavigationBar {
+            if (!imeVisible) {
+                NavigationBar {
                 NavigationBarItem(
                     selected = selectedTab == 0,
                     onClick = { selectedTab = 0 },
@@ -317,6 +322,7 @@ fun ToddMainScreen(
                     icon = { Icon(Icons.Default.Settings, contentDescription = "الإعدادات") },
                     label = { Text("الإعدادات") }
                 )
+                }
             }
         }
     ) { padding ->
@@ -917,6 +923,7 @@ fun HomeDashboard(
 ) {
     var quickInput by remember { mutableStateOf("") }
     var actionMode by remember { mutableStateOf("CHAT") }
+    var composerFocused by remember { mutableStateOf(false) }
     val chatListState = rememberLazyListState()
 
     fun submitCurrentInput() {
@@ -933,19 +940,14 @@ fun HomeDashboard(
 
     // Entering the chat, receiving a new message, or starting a reply should show
     // the newest part of the conversation instead of returning to the first message.
-    LaunchedEffect(messages.size, isBusy) {
+    LaunchedEffect(messages.size, isBusy, composerFocused) {
         val targetIndex = when {
             isBusy -> messages.size
             messages.isNotEmpty() -> messages.lastIndex
             else -> -1
         }
-        if (targetIndex >= 0) chatListState.scrollToItem(targetIndex)
-    }
-
-    // When the keyboard opens and typing begins, keep the latest message in view.
-    LaunchedEffect(quickInput.isNotEmpty()) {
-        if (quickInput.isNotEmpty() && messages.isNotEmpty()) {
-            chatListState.scrollToItem(messages.lastIndex)
+        if (targetIndex >= 0) {
+            chatListState.scrollToItem(targetIndex)
         }
     }
 
@@ -1072,7 +1074,9 @@ fun HomeDashboard(
                         }
                     )
                 },
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { composerFocused = it.isFocused },
                 maxLines = 4,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
                 keyboardActions = KeyboardActions(
