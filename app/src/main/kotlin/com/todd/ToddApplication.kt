@@ -129,7 +129,8 @@ class ToddApplication : Application() {
             context = this,
             rulesEngine = rulesEngine,
             repository = repository,
-            githubTool = githubTool
+            githubTool = githubTool,
+            remoteExecutor = remoteExecutor
         )
 
         // Local provider: real Gemini on-device inference; LOCAL_ONLY never falls back to cloud.

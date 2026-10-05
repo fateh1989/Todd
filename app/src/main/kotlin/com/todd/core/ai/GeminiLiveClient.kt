@@ -20,6 +20,11 @@ import com.todd.core.rules.RulesEngine
 import com.todd.core.rules.ActionCategory
 import com.todd.core.rules.ActionRequest
 import com.todd.core.tools.GitHubTool
+import com.todd.core.remote.RemoteExecutor
+import com.todd.core.remote.RemoteExecutionMode
+import com.todd.core.remote.RemoteJobRequest
+import com.todd.core.model.Task
+import com.todd.core.model.TaskStatus
 import com.google.firebase.ai.type.FunctionCallPart
 import com.google.firebase.ai.type.FunctionDeclaration
 import com.google.firebase.ai.type.FunctionResponsePart
@@ -72,6 +77,7 @@ class GeminiLiveClient(
     private val rulesEngine: RulesEngine,
     private val repository: ToddRepository?,
     private val githubTool: GitHubTool? = null,
+    private val remoteExecutor: RemoteExecutor? = null,
     val liveModelName: String = "gemini-3.1-flash-live-preview",
     private val sessionStarter: (suspend () -> Result<Unit>)? = null,
     private val textResponder: (suspend (String) -> Result<String>)? = null
@@ -161,6 +167,36 @@ class GeminiLiveClient(
             )
         )
 
+
+        if (remoteExecutor != null && githubTool != null) {
+            declarations += listOf(
+                FunctionDeclaration(
+                    "startRemoteVerification",
+                    "Start a persistent GitHub Actions remote Android verification job for a repository. Todd will save the task and can reconnect later.",
+                    mapOf(
+                        "repository" to Schema.string("Repository in owner/name format."),
+                        "branch" to Schema.string("Branch name, for example main."),
+                        "objective" to Schema.string("What the remote job should verify."),
+                        "completionCriteria" to Schema.string("Concrete completion criteria.")
+                    )
+                ),
+                FunctionDeclaration(
+                    "checkRemoteJob",
+                    "Reconnect to a previously started Todd remote job and return its live state and evidence.",
+                    mapOf(
+                        "jobId" to Schema.string("Todd remote job ID.")
+                    )
+                ),
+                FunctionDeclaration(
+                    "cancelRemoteJob",
+                    "Cancel a previously started Todd remote GitHub Actions job.",
+                    mapOf(
+                        "jobId" to Schema.string("Todd remote job ID.")
+                    )
+                )
+            )
+        }
+
         if (githubTool != null) {
             declarations += listOf(
                 FunctionDeclaration(
@@ -224,9 +260,15 @@ class GeminiLiveClient(
             val content = call.args["content"]?.jsonPrimitive?.content.orEmpty()
             val commitMessage = call.args["message"]?.jsonPrimitive?.content?.ifBlank { null }
                 ?: "Todd update"
+            val jobId = call.args["jobId"]?.jsonPrimitive?.content?.trim().orEmpty()
+            val objective = call.args["objective"]?.jsonPrimitive?.content?.trim().orEmpty()
+            val completionCriteria =
+                call.args["completionCriteria"]?.jsonPrimitive?.content?.trim().orEmpty()
 
             val category = when (call.name) {
                 "getCurrentDeviceContext" -> ActionCategory.SCREEN_CONTEXT_READ
+                "startRemoteVerification", "cancelRemoteJob" -> ActionCategory.RUN_SHELL_COMMAND
+                "checkRemoteJob" -> ActionCategory.GIT_READ
                 "commitRepositoryFile" ->
                     if (branch == "main" || branch == "master") ActionCategory.GIT_PUSH_MAIN
                     else ActionCategory.GIT_COMMIT_FEATURE_BRANCH
@@ -257,6 +299,164 @@ class GeminiLiveClient(
                     put("visualWidth", visual.width)
                     put("visualHeight", visual.height)
                     put("visualCapturedAt", visual.capturedAt)
+                }
+            } else if (
+                call.name == "startRemoteVerification" ||
+                call.name == "checkRemoteJob" ||
+                call.name == "cancelRemoteJob"
+            ) {
+                val executor = remoteExecutor
+                if (executor == null) {
+                    buildJsonObject {
+                        put("ok", false)
+                        put("error", "Remote executor is not connected.")
+                    }
+                } else {
+                    when (call.name) {
+                        "startRemoteVerification" -> {
+                            val tool = githubTool
+                            if (tool == null) {
+                                buildJsonObject {
+                                    put("ok", false)
+                                    put("error", "GitHub tool is not connected.")
+                                }
+                            } else if (objective.isBlank()) {
+                                buildJsonObject {
+                                    put("ok", false)
+                                    put("error", "Remote objective is required.")
+                                }
+                            } else {
+                                val infoResult = tool.getRepositoryInfo(repo, branch)
+                                val info = infoResult.getOrNull()
+                                if (info == null) {
+                                    buildJsonObject {
+                                        put("ok", false)
+                                        put(
+                                            "error",
+                                            infoResult.exceptionOrNull()?.message
+                                                ?: "Could not resolve repository state."
+                                        )
+                                    }
+                                } else {
+                                    val newJobId = "voice-remote-${System.currentTimeMillis()}"
+                                    val criteria = completionCriteria.ifBlank {
+                                        "GitHub Actions verification completes successfully with evidence."
+                                    }
+
+                                    repository?.saveTask(
+                                        Task(
+                                            id = newJobId,
+                                            projectId = "todd-main",
+                                            title = objective.take(120),
+                                            goal = objective,
+                                            userInstructions = objective,
+                                            status = TaskStatus.PLANNED,
+                                            currentStep = "Preparing remote verification",
+                                            completionCriteria = criteria
+                                        )
+                                    )
+
+                                    val started = executor.startJob(
+                                        RemoteJobRequest(
+                                            jobId = newJobId,
+                                            projectId = "todd-main",
+                                            repository = repo,
+                                            branch = branch,
+                                            startCommit = info.latestCommitSha,
+                                            objective = objective,
+                                            completionCriteria = criteria,
+                                            mode = RemoteExecutionMode.VERIFY_ANDROID
+                                        )
+                                    )
+
+                                    started.fold(
+                                        onSuccess = {
+                                            buildJsonObject {
+                                                put("ok", true)
+                                                put("jobId", newJobId)
+                                                put("repository", repo)
+                                                put("branch", branch)
+                                                put("startCommit", info.latestCommitSha)
+                                            }
+                                        },
+                                        onFailure = { error ->
+                                            buildJsonObject {
+                                                put("ok", false)
+                                                put("jobId", newJobId)
+                                                put(
+                                                    "error",
+                                                    error.message ?: "Remote verification failed to start."
+                                                )
+                                            }
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        "checkRemoteJob" -> {
+                            if (jobId.isBlank()) {
+                                buildJsonObject {
+                                    put("ok", false)
+                                    put("error", "jobId is required.")
+                                }
+                            } else {
+                                executor.reconnect(jobId).fold(
+                                    onSuccess = { state ->
+                                        buildJsonObject {
+                                            put("ok", true)
+                                            put("jobId", state.jobId)
+                                            put("status", state.status.name)
+                                            put("step", state.currentStepDescription)
+                                            put("runId", state.providerRunId ?: 0L)
+                                            put("runUrl", state.providerRunUrl ?: "")
+                                            put("headCommit", state.headCommit)
+                                            put("artifacts", state.artifactNames.joinToString("\n"))
+                                            put("failure", state.failureMessage ?: "")
+                                        }
+                                    },
+                                    onFailure = { error ->
+                                        buildJsonObject {
+                                            put("ok", false)
+                                            put("jobId", jobId)
+                                            put("error", error.message ?: "Remote job refresh failed.")
+                                        }
+                                    }
+                                )
+                            }
+                        }
+
+                        "cancelRemoteJob" -> {
+                            if (jobId.isBlank()) {
+                                buildJsonObject {
+                                    put("ok", false)
+                                    put("error", "jobId is required.")
+                                }
+                            } else {
+                                executor.requestCancel(jobId).fold(
+                                    onSuccess = { accepted ->
+                                        buildJsonObject {
+                                            put("ok", accepted)
+                                            put("jobId", jobId)
+                                            put("cancelRequested", accepted)
+                                        }
+                                    },
+                                    onFailure = { error ->
+                                        buildJsonObject {
+                                            put("ok", false)
+                                            put("jobId", jobId)
+                                            put("error", error.message ?: "Remote cancellation failed.")
+                                        }
+                                    }
+                                )
+                            }
+                        }
+
+                        else -> buildJsonObject {
+                            put("ok", false)
+                            put("error", "Unknown remote tool.")
+                        }
+                    }
                 }
             } else {
                 val tool = githubTool
