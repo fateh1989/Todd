@@ -11,7 +11,8 @@ import java.net.URL
 
 class DirectGeminiAIProvider(
     private val apiKeyProvider: () -> String?,
-    private val modelName: String = "gemini-3.8-flash"
+    private val modelName: String = "gemini-3.8-flash",
+    private val requestObserver: ((String) -> Unit)? = null
 ) : AIProvider {
 
     override val type: ProviderType = ProviderType.CLOUD_GEMINI
@@ -117,6 +118,7 @@ class DirectGeminiAIProvider(
                     connection.outputStream.bufferedWriter(Charsets.UTF_8).use {
                         it.write(body.toString())
                     }
+                    requestObserver?.invoke(modelName)
 
                     val code = connection.responseCode
                     val responseText = (if (code in 200..299) {

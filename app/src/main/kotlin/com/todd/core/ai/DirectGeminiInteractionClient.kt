@@ -43,7 +43,8 @@ class GeminiInteractionApiException(
  */
 class DirectGeminiInteractionClient(
     private val apiKeyProvider: () -> String?,
-    private val modelNameProvider: () -> String
+    private val modelNameProvider: () -> String,
+    private val requestObserver: ((String) -> Unit)? = null
 ) {
 
     suspend fun isAvailable(): Boolean = !apiKeyProvider().isNullOrBlank()
@@ -283,6 +284,7 @@ class DirectGeminiInteractionClient(
             connection.outputStream.bufferedWriter(Charsets.UTF_8).use {
                 it.write(body.toString())
             }
+            requestObserver?.invoke(body.optString("model"))
 
             val code = connection.responseCode
             val responseText = (if (code in 200..299) {

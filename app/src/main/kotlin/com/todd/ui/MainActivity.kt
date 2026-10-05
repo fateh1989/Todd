@@ -43,6 +43,7 @@ import com.todd.core.ai.LiveTranscriptItem
 import com.todd.core.ai.FirebaseRuntimeConfig
 import com.todd.core.ai.LocalOnDeviceAIProvider
 import com.todd.core.ai.GeminiCloudModel
+import com.todd.core.ai.GeminiUsageSnapshot
 import com.todd.core.remote.RemoteExecutionMode
 import com.todd.core.remote.RemoteJobRequest
 import com.todd.core.agent.AutonomousCodingRequest
@@ -192,6 +193,7 @@ fun ToddMainScreen(
     val liveTranscripts by app.liveClient.transcripts.collectAsState()
     val liveMuted by app.liveClient.isMuted.collectAsState()
     val visualScreen by ScreenCaptureStore.state.collectAsState()
+    val geminiUsage by app.geminiUsageTracker.usage.collectAsState()
     val scope = rememberCoroutineScope()
 
     var selectedTab by remember { mutableStateOf(0) }
@@ -323,6 +325,7 @@ fun ToddMainScreen(
                     voiceTranscripts = liveTranscripts,
                     voiceMuted = liveMuted,
                     selectedGeminiModel = selectedGeminiModel,
+                    geminiUsage = geminiUsage,
                     onGeminiModelChange = { model ->
                         app.geminiModelPreferenceStore.set(model)
                         selectedGeminiModel = model
@@ -813,6 +816,7 @@ fun HomeDashboard(
     voiceTranscripts: List<LiveTranscriptItem>,
     voiceMuted: Boolean,
     selectedGeminiModel: GeminiCloudModel,
+    geminiUsage: GeminiUsageSnapshot,
     onGeminiModelChange: (GeminiCloudModel) -> Unit,
     onToggleVoice: () -> Unit,
     onToggleVoiceMute: () -> Unit,
@@ -860,6 +864,11 @@ fun HomeDashboard(
             },
             fontSize = 11.sp,
             color = Color(0xFF94A3B8)
+        )
+        Text(
+            "طلبات Todd اليوم من هذا الجهاز: خفيف ${geminiUsage.flashLiteRequests} • قوي ${geminiUsage.flashRequests}",
+            fontSize = 10.sp,
+            color = Color(0xFF64748B)
         )
         Spacer(modifier = Modifier.height(8.dp))
 

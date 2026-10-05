@@ -10,6 +10,7 @@ import com.todd.core.ai.DirectGeminiInteractionClient
 import com.todd.core.ai.SelectableGeminiAIProvider
 import com.todd.core.ai.GeminiModelPreferenceStore
 import com.todd.core.ai.GeminiApiKeyStore
+import com.todd.core.ai.GeminiUsageTracker
 import com.todd.core.ai.GeminiLiveClient
 import com.todd.core.ai.FirebaseRuntimeCredentialStore
 import com.todd.core.ai.FirebaseRuntimeConfig
@@ -83,6 +84,9 @@ class ToddApplication : Application() {
     lateinit var geminiModelPreferenceStore: GeminiModelPreferenceStore
         private set
 
+    lateinit var geminiUsageTracker: GeminiUsageTracker
+        private set
+
     lateinit var directGeminiInteractionClient: DirectGeminiInteractionClient
         private set
 
@@ -122,6 +126,7 @@ class ToddApplication : Application() {
         firebaseRuntimeCredentialStore = FirebaseRuntimeCredentialStore(this)
         geminiApiKeyStore = GeminiApiKeyStore(this)
         geminiModelPreferenceStore = GeminiModelPreferenceStore(this)
+        geminiUsageTracker = GeminiUsageTracker(this)
         runCatching {
             FirebaseRuntimeConfig.applyStored(this, firebaseRuntimeCredentialStore)
         }
@@ -192,11 +197,13 @@ class ToddApplication : Application() {
         // when Firebase is unavailable on the physical device.
         val geminiLiteProvider = DirectGeminiAIProvider(
             apiKeyProvider = { geminiApiKeyStore.getKey() },
-            modelName = "gemini-3.5-flash-lite"
+            modelName = "gemini-3.5-flash-lite",
+            requestObserver = geminiUsageTracker::recordRequest
         )
         val geminiStrongProvider = DirectGeminiAIProvider(
             apiKeyProvider = { geminiApiKeyStore.getKey() },
-            modelName = "gemini-3.8-flash"
+            modelName = "gemini-3.8-flash",
+            requestObserver = geminiUsageTracker::recordRequest
         )
         val geminiProvider = SelectableGeminiAIProvider(
             selectionProvider = { geminiModelPreferenceStore.get() },
@@ -206,7 +213,8 @@ class ToddApplication : Application() {
 
         directGeminiInteractionClient = DirectGeminiInteractionClient(
             apiKeyProvider = { geminiApiKeyStore.getKey() },
-            modelNameProvider = { geminiModelPreferenceStore.get().apiName }
+            modelNameProvider = { geminiModelPreferenceStore.get().apiName },
+            requestObserver = geminiUsageTracker::recordRequest
         )
 
         autonomousCodingLoop = AutonomousCodingLoop(
