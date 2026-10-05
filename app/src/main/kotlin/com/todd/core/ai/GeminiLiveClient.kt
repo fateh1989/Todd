@@ -82,6 +82,7 @@ class GeminiLiveClient(
     private val remoteExecutor: RemoteExecutor? = null,
     private val autonomousTaskCoordinator: AutonomousTaskCoordinator? = null,
     private val stateMachine: ToddStateMachine? = null,
+    private val directLiveClient: DirectGeminiLiveWebSocketClient? = null,
     val liveModelName: String = "gemini-3.1-flash-live-preview",
     private val sessionStarter: (suspend () -> Result<Unit>)? = null,
     private val textResponder: (suspend (String) -> Result<String>)? = null
@@ -112,11 +113,14 @@ class GeminiLiveClient(
             )
         }
 
-        if (sessionStarter == null && !FirebaseRuntimeConfig.current().configured) {
+        val firebaseConfigured = FirebaseRuntimeConfig.current().configured
+        val directConfigured = directLiveClient?.isAvailable() == true
+
+        if (sessionStarter == null && !firebaseConfigured && !directConfigured) {
             _state.value = GeminiLiveState.ERROR
             return@withContext Result.failure(
                 IllegalStateException(
-                    "Firebase cloud AI is not configured for runtime use. Install a build made with the real Firebase configuration."
+                    "Gemini Live is not configured. Add a Gemini API key in Todd Settings."
                 )
             )
         }
@@ -128,19 +132,21 @@ class GeminiLiveClient(
             val injectedStarter = sessionStarter
             if (injectedStarter != null) {
                 injectedStarter().getOrThrow()
-            } else {
+            } else if (firebaseConfigured) {
                 val generationConfig = liveGenerationConfig {
                     responseModality = ResponseModality.AUDIO
                     inputAudioTranscription = AudioTranscriptionConfig()
                     outputAudioTranscription = AudioTranscriptionConfig()
                 }
 
-                val liveModel = Firebase.ai(app = FirebaseRuntimeConfig.requireConfiguredApp(), backend = GenerativeBackend.googleAI())
-                    .liveModel(
-                        modelName = liveModelName,
-                        generationConfig = generationConfig,
-                        tools = buildLiveTools()
-                    )
+                val liveModel = Firebase.ai(
+                    app = FirebaseRuntimeConfig.requireConfiguredApp(),
+                    backend = GenerativeBackend.googleAI()
+                ).liveModel(
+                    modelName = liveModelName,
+                    generationConfig = generationConfig,
+                    tools = buildLiveTools()
+                )
 
                 val session = liveModel.connect()
                 liveSession = session
@@ -149,6 +155,32 @@ class GeminiLiveClient(
                     transcriptHandler = ::handleTranscription,
                     enableInterruptions = true
                 )
+            } else {
+                val direct = requireNotNull(directLiveClient)
+                direct.start(
+                    DirectGeminiLiveCallbacks(
+                        onInputTranscript = { text ->
+                            addTranscript("USER", text)
+                            _state.value = GeminiLiveState.THINKING
+                        },
+                        onOutputTranscript = { text ->
+                            addTranscript("TODD", text)
+                            _state.value = GeminiLiveState.SPEAKING
+                        },
+                        onAudioOutput = {
+                            _state.value = GeminiLiveState.SPEAKING
+                        },
+                        onTurnComplete = {
+                            _state.value = GeminiLiveState.LISTENING
+                        },
+                        onInterrupted = {
+                            _state.value = GeminiLiveState.LISTENING
+                        },
+                        onError = {
+                            _state.value = GeminiLiveState.ERROR
+                        }
+                    )
+                ).getOrThrow()
             }
 
             _isMuted.value = false
@@ -156,6 +188,7 @@ class GeminiLiveClient(
             startScreenAwarenessStreaming()
             Result.success(true)
         } catch (e: Exception) {
+            directLiveClient?.stop()
             _state.value = GeminiLiveState.ERROR
             abandonAudioFocus()
             Result.failure(e)
@@ -743,12 +776,20 @@ class GeminiLiveClient(
 
     private fun startScreenAwarenessStreaming() {
         screenSyncJob?.cancel()
-        val session = liveSession ?: return
+        val firebaseSession = liveSession
+        val directSession = directLiveClient?.takeIf { it.isConnected() }
+        if (firebaseSession == null && directSession == null) return
 
         screenSyncJob = scope.launch {
             var lastVisualCaptureAt = 0L
 
-            while (isActive && liveSession === session) {
+            while (
+                isActive &&
+                (
+                    (firebaseSession != null && liveSession === firebaseSession) ||
+                        (directSession != null && directSession.isConnected())
+                    )
+            ) {
                 val visual = ScreenCaptureStore.state.value
                 if (
                     visual.isRunning &&
@@ -757,14 +798,20 @@ class GeminiLiveClient(
                 ) {
                     val file = File(visual.filePath)
                     if (file.exists()) {
-                        runCatching {
-                            session.sendVideoRealtime(
-                                InlineData(
-                                    data = file.readBytes(),
-                                    mimeType = "image/png",
-                                    displayName = "Todd live Android screen"
+                        if (firebaseSession != null) {
+                            runCatching {
+                                firebaseSession.sendVideoRealtime(
+                                    InlineData(
+                                        data = file.readBytes(),
+                                        mimeType = "image/png",
+                                        displayName = "Todd live Android screen"
+                                    )
                                 )
-                            )
+                            }
+                        } else {
+                            runCatching {
+                                directSession?.sendVideo(file)
+                            }
                         }
                         lastVisualCaptureAt = visual.capturedAt
                     }
@@ -785,23 +832,32 @@ class GeminiLiveClient(
         val newValue = !_isMuted.value
         _isMuted.value = newValue
 
-        val session = liveSession ?: return
-        if (newValue) {
-            session.stopAudioConversation()
-            _state.value = GeminiLiveState.LISTENING
-        } else {
-            scope.launch {
-                try {
-                    session.startAudioConversation(
-                        functionCallHandler = ::handleFunctionCall,
-                        transcriptHandler = ::handleTranscription,
-                        enableInterruptions = true
-                    )
-                    _state.value = GeminiLiveState.LISTENING
-                } catch (_: Exception) {
-                    _state.value = GeminiLiveState.ERROR
+        val session = liveSession
+        if (session != null) {
+            if (newValue) {
+                session.stopAudioConversation()
+                _state.value = GeminiLiveState.LISTENING
+            } else {
+                scope.launch {
+                    try {
+                        session.startAudioConversation(
+                            functionCallHandler = ::handleFunctionCall,
+                            transcriptHandler = ::handleTranscription,
+                            enableInterruptions = true
+                        )
+                        _state.value = GeminiLiveState.LISTENING
+                    } catch (_: Exception) {
+                        _state.value = GeminiLiveState.ERROR
+                    }
                 }
             }
+            return
+        }
+
+        val direct = directLiveClient
+        if (direct?.isConnected() == true) {
+            direct.setMuted(newValue)
+            _state.value = GeminiLiveState.LISTENING
         }
     }
 
@@ -812,6 +868,7 @@ class GeminiLiveClient(
         screenSyncJob = null
 
         session?.stopAudioConversation()
+        directLiveClient?.stop()
         _state.value = GeminiLiveState.DISCONNECTED
         _isMuted.value = false
         abandonAudioFocus()
@@ -839,6 +896,17 @@ class GeminiLiveClient(
             } catch (e: Exception) {
                 _state.value = GeminiLiveState.ERROR
                 Result.failure(e)
+            }
+        }
+
+        val direct = directLiveClient
+        if (direct?.isConnected() == true) {
+            return@withContext if (direct.sendText(speechText)) {
+                Result.success("")
+            } else {
+                Result.failure(
+                    IllegalStateException("Direct Gemini Live text send failed.")
+                )
             }
         }
 

@@ -1535,21 +1535,27 @@ fun SettingsView(
         Text("حالة الذكاء", fontWeight = FontWeight.Bold, color = Color.White)
         Spacer(modifier = Modifier.height(6.dp))
         Text(
-            if (firebaseConfigured) {
-                "الصوت المباشر: Firebase جاهز" +
-                    (firebaseProjectId?.let { " • المشروع: $it" } ?: "")
-            } else {
-                "الصوت المباشر: Firebase غير مهيأ للتشغيل الحقيقي" +
-                    (firebaseReason?.let { " • $it" } ?: "")
+            when {
+                geminiApiKeyConfigured ->
+                    "الصوت المباشر: مهيأ عبر Gemini Live المباشر باستخدام مفتاح Gemini API."
+                firebaseConfigured ->
+                    "الصوت المباشر: Firebase مهيأ" +
+                        (firebaseProjectId?.let { " • المشروع: $it" } ?: "")
+                else ->
+                    "الصوت المباشر غير مهيأ بعد."
             },
             fontSize = 12.sp,
-            color = if (firebaseConfigured) Color(0xFF10B981) else Color(0xFFF59E0B)
+            color = if (geminiApiKeyConfigured || firebaseConfigured) {
+                Color(0xFF10B981)
+            } else {
+                Color(0xFFF59E0B)
+            }
         )
 
         Spacer(modifier = Modifier.height(8.dp))
-        if (!firebaseConfigured) {
+        if (!firebaseConfigured && !geminiApiKeyConfigured) {
             Text(
-                "هذه الإعدادات مطلوبة للصوت المباشر Gemini Live فقط. المحادثة النصية أعلاه تعمل بمفتاح Gemini API مستقل.",
+                "يمكن تشغيل الصوت المباشر بإضافة مفتاح Gemini API أعلاه. Firebase مسار احتياطي اختياري.",
                 fontSize = 12.sp,
                 color = Color(0xFF94A3B8)
             )
@@ -1592,10 +1598,16 @@ fun SettingsView(
                     Text("اختيار الملف")
                 }
             }
-        } else {
+        } else if (firebaseConfigured) {
             OutlinedButton(onClick = onClearFirebaseConfig) {
                 Text("مسح إعداد Firebase المحلي")
             }
+        } else {
+            Text(
+                "Firebase غير مطلوب للصوت عند استخدام مفتاح Gemini API المباشر.",
+                fontSize = 11.sp,
+                color = Color(0xFF94A3B8)
+            )
         }
 
         Spacer(modifier = Modifier.height(10.dp))

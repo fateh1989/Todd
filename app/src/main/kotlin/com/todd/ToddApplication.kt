@@ -7,6 +7,7 @@ import com.todd.core.ai.AIRouter
 import com.todd.core.ai.LocalOnDeviceAIProvider
 import com.todd.core.ai.DirectGeminiAIProvider
 import com.todd.core.ai.DirectGeminiInteractionClient
+import com.todd.core.ai.DirectGeminiLiveWebSocketClient
 import com.todd.core.ai.SelectableGeminiAIProvider
 import com.todd.core.ai.GeminiModelPreferenceStore
 import com.todd.core.ai.GeminiApiKeyStore
@@ -88,6 +89,9 @@ class ToddApplication : Application() {
         private set
 
     lateinit var directGeminiInteractionClient: DirectGeminiInteractionClient
+        private set
+
+    lateinit var directGeminiLiveClient: DirectGeminiLiveWebSocketClient
         private set
 
     lateinit var rulesEngine: RulesEngine
@@ -216,6 +220,9 @@ class ToddApplication : Application() {
             modelNameProvider = { geminiModelPreferenceStore.get().apiName },
             requestObserver = geminiUsageTracker::recordRequest
         )
+        directGeminiLiveClient = DirectGeminiLiveWebSocketClient(
+            apiKeyProvider = { geminiApiKeyStore.getKey() }
+        )
 
         autonomousCodingLoop = AutonomousCodingLoop(
             aiProvider = geminiProvider,
@@ -241,7 +248,8 @@ class ToddApplication : Application() {
             githubTool = githubTool,
             remoteExecutor = remoteExecutor,
             autonomousTaskCoordinator = autonomousTaskCoordinator,
-            stateMachine = stateMachine
+            stateMachine = stateMachine,
+            directLiveClient = directGeminiLiveClient
         )
 
         aiRouter = AIRouter(
