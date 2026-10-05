@@ -6,9 +6,9 @@ enum class GeminiCloudModel(
     val apiName: String,
     val displayName: String
 ) {
-    FLASH_LITE_3_1(
-        apiName = "gemini-3.1-flash-lite",
-        displayName = "Gemini 3.1 Flash-Lite"
+    FLASH_LITE_3_5(
+        apiName = "gemini-3.5-flash-lite",
+        displayName = "Gemini 3.5 Flash-Lite"
     ),
     FLASH_3_8(
         apiName = "gemini-3.8-flash",
