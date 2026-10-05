@@ -163,14 +163,6 @@ class ToddApplication : Application() {
                 }
             }
         )
-        liveClient = GeminiLiveClient(
-            context = this,
-            rulesEngine = rulesEngine,
-            repository = repository,
-            githubTool = githubTool,
-            remoteExecutor = remoteExecutor
-        )
-
         // Local provider: real Gemini on-device inference; LOCAL_ONLY never falls back to cloud.
         val localProvider = LocalOnDeviceAIProvider(modelName = "gemini-3.5-flash-lite")
 
@@ -194,6 +186,15 @@ class ToddApplication : Application() {
             scheduleRecovery = {
                 AutonomousRecoveryScheduler.schedule(this@ToddApplication)
             }
+        )
+        liveClient = GeminiLiveClient(
+            context = this,
+            rulesEngine = rulesEngine,
+            repository = repository,
+            githubTool = githubTool,
+            remoteExecutor = remoteExecutor,
+            autonomousTaskCoordinator = autonomousTaskCoordinator,
+            stateMachine = stateMachine
         )
 
         aiRouter = AIRouter(

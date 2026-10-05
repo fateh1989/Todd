@@ -25,6 +25,8 @@ import com.todd.core.remote.RemoteExecutionMode
 import com.todd.core.remote.RemoteJobRequest
 import com.todd.core.model.Task
 import com.todd.core.model.TaskStatus
+import com.todd.core.agent.AutonomousTaskCoordinator
+import com.todd.core.state.ToddStateMachine
 import com.google.firebase.ai.type.FunctionCallPart
 import com.google.firebase.ai.type.FunctionDeclaration
 import com.google.firebase.ai.type.FunctionResponsePart
@@ -78,6 +80,8 @@ class GeminiLiveClient(
     private val repository: ToddRepository?,
     private val githubTool: GitHubTool? = null,
     private val remoteExecutor: RemoteExecutor? = null,
+    private val autonomousTaskCoordinator: AutonomousTaskCoordinator? = null,
+    private val stateMachine: ToddStateMachine? = null,
     val liveModelName: String = "gemini-3.1-flash-live-preview",
     private val sessionStarter: (suspend () -> Result<Unit>)? = null,
     private val textResponder: (suspend (String) -> Result<String>)? = null
@@ -167,6 +171,33 @@ class GeminiLiveClient(
             )
         )
 
+
+        if (autonomousTaskCoordinator != null && repository != null) {
+            declarations += listOf(
+                FunctionDeclaration(
+                    "startAutonomousCoding",
+                    "Start Todd's persistent autonomous coding loop from the live voice conversation.",
+                    mapOf(
+                        "objective" to Schema.string("Exact coding objective spoken by the owner."),
+                        "projectId" to Schema.string("Todd project ID. Leave blank to use the active project.")
+                    )
+                ),
+                FunctionDeclaration(
+                    "checkTaskStatus",
+                    "Read one durable Todd task state, step, failure, and evidence.",
+                    mapOf(
+                        "taskId" to Schema.string("Todd task ID.")
+                    )
+                ),
+                FunctionDeclaration(
+                    "checkLatestTask",
+                    "Read the newest durable task for the active or specified Todd project.",
+                    mapOf(
+                        "projectId" to Schema.string("Todd project ID. Leave blank to use the active project.")
+                    )
+                )
+            )
+        }
 
         if (remoteExecutor != null && githubTool != null) {
             declarations += listOf(
@@ -261,14 +292,20 @@ class GeminiLiveClient(
             val commitMessage = call.args["message"]?.jsonPrimitive?.content?.ifBlank { null }
                 ?: "Todd update"
             val jobId = call.args["jobId"]?.jsonPrimitive?.content?.trim().orEmpty()
+            val taskId = call.args["taskId"]?.jsonPrimitive?.content?.trim().orEmpty()
+            val requestedProjectId = call.args["projectId"]?.jsonPrimitive?.content?.trim().orEmpty()
+            val activeProjectId = requestedProjectId.ifBlank {
+                stateMachine?.state?.value?.activeProjectId ?: "todd-main"
+            }
             val objective = call.args["objective"]?.jsonPrimitive?.content?.trim().orEmpty()
             val completionCriteria =
                 call.args["completionCriteria"]?.jsonPrimitive?.content?.trim().orEmpty()
 
             val category = when (call.name) {
                 "getCurrentDeviceContext" -> ActionCategory.SCREEN_CONTEXT_READ
-                "startRemoteVerification", "cancelRemoteJob" -> ActionCategory.RUN_SHELL_COMMAND
-                "checkRemoteJob" -> ActionCategory.GIT_READ
+                "startRemoteVerification", "startAutonomousCoding", "cancelRemoteJob" ->
+                    ActionCategory.RUN_SHELL_COMMAND
+                "checkRemoteJob", "checkTaskStatus", "checkLatestTask" -> ActionCategory.GIT_READ
                 "commitRepositoryFile" ->
                     if (branch == "main" || branch == "master") ActionCategory.GIT_PUSH_MAIN
                     else ActionCategory.GIT_COMMIT_FEATURE_BRANCH
@@ -278,7 +315,7 @@ class GeminiLiveClient(
             val evaluation = rulesEngine.evaluate(
                 ActionRequest(
                     category = category,
-                    projectId = "todd-main",
+                    projectId = activeProjectId,
                     target = repo,
                     dataSummary = "Gemini Live tool call: ${call.name}",
                     isPreApprovedInInstruction = true
@@ -299,6 +336,81 @@ class GeminiLiveClient(
                     put("visualWidth", visual.width)
                     put("visualHeight", visual.height)
                     put("visualCapturedAt", visual.capturedAt)
+                }
+            } else if (
+                call.name == "startAutonomousCoding" ||
+                call.name == "checkTaskStatus" ||
+                call.name == "checkLatestTask"
+            ) {
+                val coordinator = autonomousTaskCoordinator
+                val repoStore = repository
+                if (coordinator == null || repoStore == null) {
+                    buildJsonObject {
+                        put("ok", false)
+                        put("error", "Todd autonomous task tools are not connected.")
+                    }
+                } else {
+                    when (call.name) {
+                        "startAutonomousCoding" -> {
+                            if (objective.isBlank()) {
+                                buildJsonObject {
+                                    put("ok", false)
+                                    put("error", "Coding objective is required.")
+                                }
+                            } else {
+                                val newTaskId = coordinator.start(
+                                    projectId = activeProjectId,
+                                    title = objective.take(120),
+                                    goal = objective,
+                                    maxIterations = 4
+                                )
+                                buildJsonObject {
+                                    put("ok", true)
+                                    put("taskId", newTaskId)
+                                    put("projectId", activeProjectId)
+                                    put("status", "STARTED")
+                                }
+                            }
+                        }
+
+                        "checkTaskStatus" -> {
+                            if (taskId.isBlank()) {
+                                buildJsonObject {
+                                    put("ok", false)
+                                    put("error", "taskId is required.")
+                                }
+                            } else {
+                                val task = repoStore.getTaskById(taskId)
+                                if (task == null) {
+                                    buildJsonObject {
+                                        put("ok", false)
+                                        put("taskId", taskId)
+                                        put("error", "Todd task was not found.")
+                                    }
+                                } else {
+                                    taskJson(task)
+                                }
+                            }
+                        }
+
+                        "checkLatestTask" -> {
+                            val task = repoStore.getLatestTaskForProject(activeProjectId)
+                            if (task == null) {
+                                buildJsonObject {
+                                    put("ok", true)
+                                    put("found", false)
+                                    put("projectId", activeProjectId)
+                                }
+                            } else {
+                                taskJson(task)
+                            }
+                        }
+
+                        else -> buildJsonObject {
+                            put("ok", false)
+                            put("error", "Unknown Todd task tool.")
+                        }
+                    }
                 }
             } else if (
                 call.name == "startRemoteVerification" ||
@@ -346,7 +458,7 @@ class GeminiLiveClient(
                                     repository?.saveTask(
                                         Task(
                                             id = newJobId,
-                                            projectId = "todd-main",
+                                            projectId = activeProjectId,
                                             title = objective.take(120),
                                             goal = objective,
                                             userInstructions = objective,
@@ -359,7 +471,7 @@ class GeminiLiveClient(
                                     val started = executor.startJob(
                                         RemoteJobRequest(
                                             jobId = newJobId,
-                                            projectId = "todd-main",
+                                            projectId = activeProjectId,
                                             repository = repo,
                                             branch = branch,
                                             startCommit = info.latestCommitSha,
@@ -601,6 +713,20 @@ class GeminiLiveClient(
         }
 
         return FunctionResponsePart(call.name, response, call.id)
+    }
+
+    private fun taskJson(task: Task): JsonObject = buildJsonObject {
+        put("ok", true)
+        put("found", true)
+        put("taskId", task.id)
+        put("projectId", task.projectId)
+        put("title", task.title)
+        put("goal", task.goal)
+        put("status", task.status.name)
+        put("step", task.currentStep)
+        put("evidence", task.lastEvidence ?: "")
+        put("failure", task.failureCause ?: "")
+        put("updatedAt", task.updatedAt)
     }
 
     private fun handleTranscription(input: Transcription?, output: Transcription?) {
