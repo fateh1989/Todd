@@ -35,7 +35,7 @@ Verified on the owner's Android device:
 CI verified, physical-device verification pending:
 - build and release metadata diagnostics card (Version name/code, Git commit SHA, Actions run number, build timestamp, signing status, certificate SHA-256);
 - keyboard IME typing, actions (rewrite, correct, translate, summarize, explain, continue, reply, research), and direct Todd agent routing;
-- manual Gemini model selector (`gemini-3.1-flash-lite` vs `gemini-3.8-flash`);
+- manual Gemini model selector (`gemini-3.5-flash-lite` vs `gemini-3.8-flash`);
 - direct Interactions tool calls and live Google Search grounding;
 - Gemini Live direct WebSocket (`gemini-3.8-live`) with audio I/O and tool calling;
 - floating overlay drag target bar (Hide vs Power Off with 1.2s hold) and state-aware visual button badge;
@@ -55,7 +55,7 @@ CI verified, physical-device verification pending:
 - AI modes: Local Only / Auto / Cloud Preferred.
 - Encrypted Gemini API credential storage on Android Keystore.
 - Manual persisted Gemini model choice:
-  - Gemini 3.1 Flash-Lite (`gemini-3.1-flash-lite`) for frequent/light work.
+  - Gemini 3.5 Flash-Lite (`gemini-3.5-flash-lite`) for frequent/light work.
   - Gemini 3.8 Flash (`gemini-3.8-flash`) for coding/difficult work.
   - Gemini 3.8 Live (`gemini-3.8-live`) for live voice sessions.
 - The owner chooses the cloud model; Todd never silently auto-switches models.
@@ -70,6 +70,12 @@ CI verified, physical-device verification pending:
 - Permissions UI dynamically updates and hides activation buttons once active.
 - Read-only Build & Release Metadata card in Settings/Diagnostics showing version name/code, Git commit SHA, GitHub Actions run number, build timestamp, signing status, and certificate SHA-256 without exposing keys or secrets.
 - Chat composer uses IME padding and MainActivity uses adjustResize.
+
+## Latest build fix pending verification
+- Todd Android CI run 110 failed because the Gradle Kotlin DSL could not resolve the fully-qualified `java.time` expression used for build metadata.
+- The build metadata code now imports `java.time.Instant` and uses `Instant.now().toString()`.
+- The light Gemini model has been moved from deprecated `gemini-3.1-flash-lite` to current `gemini-3.5-flash-lite`.
+- These newest changes must receive a green GitHub Actions run before they are described as CI verified.
 
 ## Current limitations
 - The owner's physical device reported the on-device model unavailable; local AI is optional and does not block Todd.
