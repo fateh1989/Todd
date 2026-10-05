@@ -5,7 +5,8 @@ import com.todd.data.local.ToddDatabase
 import com.todd.data.repository.ToddRepository
 import com.todd.core.ai.AIRouter
 import com.todd.core.ai.LocalOnDeviceAIProvider
-import com.todd.core.ai.GeminiAIProvider
+import com.todd.core.ai.DirectGeminiAIProvider
+import com.todd.core.ai.GeminiApiKeyStore
 import com.todd.core.ai.GeminiLiveClient
 import com.todd.core.ai.FirebaseRuntimeCredentialStore
 import com.todd.core.ai.FirebaseRuntimeConfig
@@ -73,6 +74,9 @@ class ToddApplication : Application() {
     lateinit var firebaseRuntimeCredentialStore: FirebaseRuntimeCredentialStore
         private set
 
+    lateinit var geminiApiKeyStore: GeminiApiKeyStore
+        private set
+
     lateinit var rulesEngine: RulesEngine
         private set
 
@@ -107,6 +111,7 @@ class ToddApplication : Application() {
         activeProjectStore.get()?.let(stateMachine::setActiveProject)
         githubCredentialStore = GitHubCredentialStore(this)
         firebaseRuntimeCredentialStore = FirebaseRuntimeCredentialStore(this)
+        geminiApiKeyStore = GeminiApiKeyStore(this)
         runCatching {
             FirebaseRuntimeConfig.applyStored(this, firebaseRuntimeCredentialStore)
         }
@@ -171,9 +176,14 @@ class ToddApplication : Application() {
         // Local provider: real Gemini on-device inference; LOCAL_ONLY never falls back to cloud.
         val localProvider = LocalOnDeviceAIProvider(modelName = "gemini-3.5-flash-lite")
 
-        // Cloud provider: current Firebase AI Logic using the Gemini Developer API backend
-        // Credentials are secure and managed via Firebase project configuration (no hardcoded keys)
-        val geminiProvider = GeminiAIProvider(modelName = "gemini-3.8-flash")
+        // Primary cloud text provider: direct Gemini Developer API.
+        // The owner enters one Gemini API key in Settings; it is encrypted with Android Keystore.
+        // This deliberately does not depend on google-services.json so text chat can work even
+        // when Firebase is unavailable on the physical device.
+        val geminiProvider = DirectGeminiAIProvider(
+            apiKeyProvider = { geminiApiKeyStore.getKey() },
+            modelName = "gemini-3.8-flash"
+        )
 
         autonomousCodingLoop = AutonomousCodingLoop(
             aiProvider = geminiProvider,

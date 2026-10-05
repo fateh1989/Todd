@@ -65,16 +65,17 @@ class ToddDiagnostics(
         val firebase = FirebaseRuntimeConfig.current()
         checks += DiagnosticCheck(
             id = "firebase",
-            title = "إعداد الذكاء السحابي",
+            title = "Firebase للصوت المباشر",
             status = if (firebase.configured) DiagnosticStatus.PASS else DiagnosticStatus.WARN,
             detail = if (firebase.configured) {
                 "Firebase مهيأ للمشروع ${firebase.projectId ?: "غير معروف"}."
             } else {
-                firebase.reason ?: "Firebase غير مهيأ."
+                firebase.reason ?: "Firebase غير مهيأ؛ هذا لا يمنع محادثة Todd النصية المباشرة."
             }
         )
 
-        if (firebase.configured) {
+        val cloudAvailable = runCatching { aiRouter.cloudProvider.isAvailable() }.getOrDefault(false)
+        if (cloudAvailable) {
             val cloud = aiRouter.cloudProvider.generateText(
                 AIRequest(
                     prompt = "Reply with exactly: TODD_DIAGNOSTIC_OK",
@@ -85,19 +86,19 @@ class ToddDiagnostics(
             )
             checks += DiagnosticCheck(
                 id = "cloud",
-                title = "الاتصال السحابي الحقيقي",
+                title = "Gemini النصي المباشر",
                 status = if (cloud.isSuccess) DiagnosticStatus.PASS else DiagnosticStatus.FAIL,
                 detail = cloud.fold(
-                    onSuccess = { "تم استلام رد فعلي من مزود الذكاء السحابي." },
-                    onFailure = { it.message ?: "فشل طلب الذكاء السحابي." }
+                    onSuccess = { "تم استلام رد فعلي من Gemini مباشرة." },
+                    onFailure = { it.message ?: "فشل طلب Gemini المباشر." }
                 )
             )
         } else {
             checks += DiagnosticCheck(
                 id = "cloud",
-                title = "الاتصال السحابي الحقيقي",
+                title = "Gemini النصي المباشر",
                 status = DiagnosticStatus.WARN,
-                detail = "لم يُختبر لأن Firebase غير مهيأ بعد."
+                detail = "أضف مفتاح Gemini API من إعدادات Todd لتشغيل المحادثة النصية."
             )
         }
 

@@ -183,6 +183,7 @@ fun ToddMainScreen(
     var diagnosticsBusy by remember { mutableStateOf(false) }
     var diagnosticsReport by remember { mutableStateOf<ToddDiagnosticReport?>(null) }
     var firebaseRuntimeStatus by remember { mutableStateOf(FirebaseRuntimeConfig.current()) }
+    var geminiApiKeyConfigured by remember { mutableStateOf(app.geminiApiKeyStore.hasKey()) }
 
     Scaffold(
         topBar = {
@@ -555,6 +556,7 @@ fun ToddMainScreen(
                     visualScreenRunning = visualScreen.isRunning,
                     lastVisualCaptureAt = visualScreen.capturedAt,
                     githubTokenConfigured = app.githubCredentialStore.hasToken(),
+                    geminiApiKeyConfigured = geminiApiKeyConfigured,
                     firebaseConfigured = firebaseRuntimeStatus.configured,
                     firebaseProjectId = firebaseRuntimeStatus.projectId,
                     firebaseReason = firebaseRuntimeStatus.reason,
@@ -562,12 +564,27 @@ fun ToddMainScreen(
                     localAIBusy = localAIBusy,
                     cloudAIStatus = cloudAIStatus,
                     cloudAIBusy = cloudAIBusy,
+                    onSaveGeminiApiKey = { key ->
+                        runCatching { app.geminiApiKeyStore.saveKey(key) }
+                            .onSuccess {
+                                geminiApiKeyConfigured = true
+                                cloudAIStatus = "تم حفظ مفتاح Gemini؛ اختبر الاتصال الآن"
+                                app.autonomousTaskCoordinator.resumePending()
+                            }
+                            .onFailure { error ->
+                                cloudAIStatus = "تعذر حفظ مفتاح Gemini: ${error.message ?: "خطأ غير معروف"}"
+                            }
+                    },
+                    onClearGeminiApiKey = {
+                        app.geminiApiKeyStore.clear()
+                        geminiApiKeyConfigured = false
+                        cloudAIStatus = "تم مسح مفتاح Gemini"
+                    },
                     onCheckCloudAI = {
                         scope.launch {
                             cloudAIBusy = true
-                            firebaseRuntimeStatus = FirebaseRuntimeConfig.current()
-                            cloudAIStatus = if (!firebaseRuntimeStatus.configured) {
-                                "أضف إعداد Firebase الحقيقي أولاً"
+                            cloudAIStatus = if (!geminiApiKeyConfigured) {
+                                "أضف مفتاح Gemini API أولاً"
                             } else {
                                 app.aiRouter.cloudProvider.generateText(
                                     com.todd.core.ai.AIRequest(
@@ -1260,6 +1277,7 @@ fun SettingsView(
     visualScreenRunning: Boolean,
     lastVisualCaptureAt: Long,
     githubTokenConfigured: Boolean,
+    geminiApiKeyConfigured: Boolean,
     firebaseConfigured: Boolean,
     firebaseProjectId: String?,
     firebaseReason: String?,
@@ -1267,6 +1285,8 @@ fun SettingsView(
     localAIBusy: Boolean,
     cloudAIStatus: String,
     cloudAIBusy: Boolean,
+    onSaveGeminiApiKey: (String) -> Unit,
+    onClearGeminiApiKey: () -> Unit,
     onCheckCloudAI: () -> Unit,
     onCheckLocalAI: () -> Unit,
     onPrepareLocalAI: () -> Unit,
@@ -1284,6 +1304,7 @@ fun SettingsView(
     onStopVisualScreen: () -> Unit
 ) {
     var githubToken by remember { mutableStateOf("") }
+    var geminiApiKey by remember { mutableStateOf("") }
     var firebaseConfigJson by remember { mutableStateOf("") }
     val context = LocalContext.current
     val firebaseFileLauncher = rememberLauncherForActivityResult(
@@ -1321,14 +1342,72 @@ fun SettingsView(
         }
 
         Spacer(modifier = Modifier.height(20.dp))
+        Text("ذكاء Todd النصي — Gemini API", fontWeight = FontWeight.Bold, color = Color.White)
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            if (geminiApiKeyConfigured) {
+                "المحادثة النصية السحابية مهيأة بمفتاح Gemini محفوظ ومشفّر داخل Android Keystore."
+            } else {
+                "أدخل مفتاح Gemini API مرة واحدة لتشغيل محادثة Todd النصية مباشرة، دون الحاجة إلى Firebase."
+            },
+            fontSize = 12.sp,
+            color = if (geminiApiKeyConfigured) Color(0xFF10B981) else Color(0xFFF59E0B)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        if (!geminiApiKeyConfigured) {
+            OutlinedTextField(
+                value = geminiApiKey,
+                onValueChange = { geminiApiKey = it.trim() },
+                label = { Text("مفتاح Gemini API") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth()
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(
+                onClick = {
+                    if (geminiApiKey.isNotBlank()) {
+                        onSaveGeminiApiKey(geminiApiKey)
+                        geminiApiKey = ""
+                    }
+                },
+                enabled = geminiApiKey.isNotBlank()
+            ) {
+                Icon(Icons.Default.Key, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(5.dp))
+                Text("حفظ وتشغيل الذكاء النصي")
+            }
+        } else {
+            OutlinedButton(onClick = onClearGeminiApiKey) {
+                Text("مسح مفتاح Gemini")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+        Text(
+            "اختبار Gemini: $cloudAIStatus",
+            fontSize = 12.sp,
+            color = Color(0xFFCBD5E1)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = onCheckCloudAI,
+            enabled = geminiApiKeyConfigured && !cloudAIBusy
+        ) {
+            Icon(Icons.Default.Cloud, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(5.dp))
+            Text(if (cloudAIBusy) "جارٍ الاختبار..." else "اختبار Gemini الآن")
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
         Text("حالة الذكاء", fontWeight = FontWeight.Bold, color = Color.White)
         Spacer(modifier = Modifier.height(6.dp))
         Text(
             if (firebaseConfigured) {
-                "الذكاء السحابي: Firebase جاهز" +
+                "الصوت المباشر: Firebase جاهز" +
                     (firebaseProjectId?.let { " • المشروع: $it" } ?: "")
             } else {
-                "الذكاء السحابي: غير مهيأ للتشغيل الحقيقي" +
+                "الصوت المباشر: Firebase غير مهيأ للتشغيل الحقيقي" +
                     (firebaseReason?.let { " • $it" } ?: "")
             },
             fontSize = 12.sp,
@@ -1338,7 +1417,7 @@ fun SettingsView(
         Spacer(modifier = Modifier.height(8.dp))
         if (!firebaseConfigured) {
             Text(
-                "يمكنك لصق محتوى google-services.json الحقيقي هنا مرة واحدة. يحفظ Todd بيانات الاتصال مشفّرة داخل Android Keystore، ولا تحتاج إلى إعادة بناء APK.",
+                "هذه الإعدادات مطلوبة للصوت المباشر Gemini Live فقط. المحادثة النصية أعلاه تعمل بمفتاح Gemini API مستقل.",
                 fontSize = 12.sp,
                 color = Color(0xFF94A3B8)
             )
@@ -1385,22 +1464,6 @@ fun SettingsView(
             OutlinedButton(onClick = onClearFirebaseConfig) {
                 Text("مسح إعداد Firebase المحلي")
             }
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-        Text(
-            "اختبار السحابي: $cloudAIStatus",
-            fontSize = 12.sp,
-            color = Color(0xFFCBD5E1)
-        )
-        Spacer(modifier = Modifier.height(8.dp))
-        OutlinedButton(
-            onClick = onCheckCloudAI,
-            enabled = firebaseConfigured && !cloudAIBusy
-        ) {
-            Icon(Icons.Default.Cloud, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(5.dp))
-            Text(if (cloudAIBusy) "جارٍ الاختبار..." else "اختبار الاتصال السحابي")
         }
 
         Spacer(modifier = Modifier.height(10.dp))
