@@ -237,6 +237,23 @@ class ToddTextAgent(
             )
         ),
         FunctionDeclaration(
+            "listRepositoryFiles",
+            "List repository file paths before deciding what to inspect.",
+            mapOf(
+                "repository" to Schema.string("Repository in owner/name form."),
+                "branch" to Schema.string("Branch name, normally main.")
+            )
+        ),
+        FunctionDeclaration(
+            "readRepositoryFile",
+            "Read the current text content of one repository file.",
+            mapOf(
+                "repository" to Schema.string("Repository in owner/name form."),
+                "path" to Schema.string("Repository-relative file path."),
+                "ref" to Schema.string("Branch or commit SHA; normally main.")
+            )
+        ),
+        FunctionDeclaration(
             "startAutonomousCoding",
             "Start Todd's persistent autonomous coding loop for the current project. Use this when the user asks Todd to implement, fix, change, or build code.",
             mapOf(
@@ -302,6 +319,24 @@ class ToddTextAgent(
                 "repository" to "Repository in owner/name form.",
                 "branch" to "Branch name, normally main."
             )
+        ),
+        directTool(
+            name = "listRepositoryFiles",
+            description = "List repository file paths before deciding what to inspect.",
+            params = mapOf(
+                "repository" to "Repository in owner/name form.",
+                "branch" to "Branch name, normally main."
+            )
+        ),
+        directTool(
+            name = "readRepositoryFile",
+            description = "Read the current text content of one repository file.",
+            params = mapOf(
+                "repository" to "Repository in owner/name form.",
+                "path" to "Repository-relative file path.",
+                "ref" to "Branch or commit SHA; normally main."
+            ),
+            required = listOf("path")
         ),
         directTool(
             name = "startAutonomousCoding",
@@ -447,6 +482,45 @@ class ToddTextAgent(
                     },
                     onFailure = { error -> errorJson(error) }
                 )
+            }
+
+            "listRepositoryFiles" -> {
+                val repo = argValue("repository").ifBlank { "fateh1989/Todd" }
+                val branch = argValue("branch").ifBlank { "main" }
+                githubTool.listRepositoryFiles(repo, branch).fold(
+                    onSuccess = { files ->
+                        buildJsonObject {
+                            put("ok", true)
+                            put("count", files.size)
+                            put("files", files.joinToString("\n"))
+                        }
+                    },
+                    onFailure = { error -> errorJson(error) }
+                )
+            }
+
+            "readRepositoryFile" -> {
+                val repo = argValue("repository").ifBlank { "fateh1989/Todd" }
+                val path = argValue("path")
+                val ref = argValue("ref").ifBlank { argValue("branch").ifBlank { "main" } }
+                if (path.isBlank()) {
+                    buildJsonObject {
+                        put("ok", false)
+                        put("error", "File path is required.")
+                    }
+                } else {
+                    githubTool.readFile(repo, path, ref).fold(
+                        onSuccess = { file ->
+                            buildJsonObject {
+                                put("ok", true)
+                                put("path", file.path)
+                                put("sha", file.sha)
+                                put("content", file.content)
+                            }
+                        },
+                        onFailure = { error -> errorJson(error) }
+                    )
+                }
             }
 
             "startAutonomousCoding" -> {
