@@ -543,7 +543,7 @@ fun ToddMainScreen(
                                 }
                             }
                         }
-
+                    }
                 )
                 1 -> ProjectsView(projects)
                 2 -> ActivityView(
