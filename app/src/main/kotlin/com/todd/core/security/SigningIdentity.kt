@@ -29,7 +29,7 @@ object SigningIdentity {
             ).signatures
         }
 
-        val certificate = signatures.firstOrNull() ?: return null
+        val certificate = signatures?.firstOrNull() ?: return null
         return MessageDigest.getInstance("SHA-256")
             .digest(certificate.toByteArray())
             .joinToString("") { "%02x".format(it) }
