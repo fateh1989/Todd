@@ -6,6 +6,7 @@ import com.todd.data.repository.ToddRepository
 import com.todd.core.ai.AIRouter
 import com.todd.core.ai.LocalOnDeviceAIProvider
 import com.todd.core.ai.DirectGeminiAIProvider
+import com.todd.core.ai.DirectGeminiInteractionClient
 import com.todd.core.ai.SelectableGeminiAIProvider
 import com.todd.core.ai.GeminiModelPreferenceStore
 import com.todd.core.ai.GeminiApiKeyStore
@@ -80,6 +81,9 @@ class ToddApplication : Application() {
         private set
 
     lateinit var geminiModelPreferenceStore: GeminiModelPreferenceStore
+        private set
+
+    lateinit var directGeminiInteractionClient: DirectGeminiInteractionClient
         private set
 
     lateinit var rulesEngine: RulesEngine
@@ -200,6 +204,11 @@ class ToddApplication : Application() {
             strongProvider = geminiStrongProvider
         )
 
+        directGeminiInteractionClient = DirectGeminiInteractionClient(
+            apiKeyProvider = { geminiApiKeyStore.getKey() },
+            modelNameProvider = { geminiModelPreferenceStore.get().apiName }
+        )
+
         autonomousCodingLoop = AutonomousCodingLoop(
             aiProvider = geminiProvider,
             githubTool = githubTool,
@@ -239,7 +248,8 @@ class ToddApplication : Application() {
             repository = repository,
             taskScheduler = taskScheduler,
             stateMachine = stateMachine,
-            rulesEngine = rulesEngine
+            rulesEngine = rulesEngine,
+            directInteractionClient = directGeminiInteractionClient
         )
         diagnostics = ToddDiagnostics(
             context = this,
