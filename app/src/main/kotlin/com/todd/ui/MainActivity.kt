@@ -925,6 +925,8 @@ fun HomeDashboard(
     var actionMode by remember { mutableStateOf("CHAT") }
     var composerFocused by remember { mutableStateOf(false) }
     val chatListState = rememberLazyListState()
+    val density = LocalDensity.current
+    val imeVisible = WindowInsets.ime.getBottom(density) > 0
 
     fun submitCurrentInput() {
         val text = quickInput.trim()
@@ -940,7 +942,7 @@ fun HomeDashboard(
 
     // Entering the chat, receiving a new message, or starting a reply should show
     // the newest part of the conversation instead of returning to the first message.
-    LaunchedEffect(messages.size, isBusy, composerFocused) {
+    LaunchedEffect(messages.size, isBusy, composerFocused, imeVisible) {
         val targetIndex = when {
             isBusy -> messages.size
             messages.isNotEmpty() -> messages.lastIndex
@@ -952,7 +954,10 @@ fun HomeDashboard(
     }
 
     Column(
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier
+            .fillMaxSize()
+            // Activity uses adjustNothing; Compose applies the IME height exactly once.
+            .imePadding()
     ) {
         VoiceConversationCard(
             state = voiceState,
@@ -1013,10 +1018,7 @@ fun HomeDashboard(
         }
 
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                // The Activity already uses adjustResize. Do not add IME padding here;
-                // it would reserve the keyboard height a second time and create a gap.
+            modifier = Modifier.fillMaxWidth()
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
