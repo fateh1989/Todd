@@ -1015,9 +1015,8 @@ fun HomeDashboard(
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                // Apply the keyboard inset only to the composer. Applying it to the
-                // whole chat created a large empty gap; omitting it hid the composer.
-                .imePadding()
+                // The Activity already uses adjustResize. Do not add IME padding here;
+                // it would reserve the keyboard height a second time and create a gap.
         ) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
