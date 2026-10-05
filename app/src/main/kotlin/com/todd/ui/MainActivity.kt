@@ -12,6 +12,7 @@ import android.media.projection.MediaProjectionManager
 import androidx.activity.ComponentActivity
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -24,6 +25,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -1015,6 +1017,18 @@ fun SettingsView(
 ) {
     var githubToken by remember { mutableStateOf("") }
     var firebaseConfigJson by remember { mutableStateOf("") }
+    val context = LocalContext.current
+    val firebaseFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            val raw = runCatching {
+                context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    ?: throw IllegalStateException("تعذر قراءة الملف المحدد.")
+            }
+            raw.onSuccess(onSaveFirebaseConfig)
+        }
+    }
 
     Column {
         Text("وضع توجيه الذكاء الاصطناعي (AI Routing)", fontWeight = FontWeight.Bold, color = Color.White)
@@ -1071,16 +1085,33 @@ fun SettingsView(
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(8.dp))
-            Button(
-                onClick = {
-                    if (firebaseConfigJson.isNotBlank()) {
-                        onSaveFirebaseConfig(firebaseConfigJson)
-                        firebaseConfigJson = ""
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(
+                    onClick = {
+                        if (firebaseConfigJson.isNotBlank()) {
+                            onSaveFirebaseConfig(firebaseConfigJson)
+                            firebaseConfigJson = ""
+                        }
+                    },
+                    enabled = firebaseConfigJson.isNotBlank()
+                ) {
+                    Text("حفظ وتشغيل الذكاء السحابي")
+                }
+                OutlinedButton(
+                    onClick = {
+                        firebaseFileLauncher.launch(
+                            arrayOf("application/json", "text/plain", "application/octet-stream")
+                        )
                     }
-                },
-                enabled = firebaseConfigJson.isNotBlank()
-            ) {
-                Text("حفظ وتشغيل الذكاء السحابي")
+                ) {
+                    Icon(
+                        Icons.Default.FolderOpen,
+                        contentDescription = null,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Spacer(modifier = Modifier.width(5.dp))
+                    Text("اختيار الملف")
+                }
             }
         } else {
             OutlinedButton(onClick = onClearFirebaseConfig) {
