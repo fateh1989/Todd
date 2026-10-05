@@ -858,9 +858,9 @@ fun HomeDashboard(
         Spacer(modifier = Modifier.height(6.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(
-                selected = selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_1,
-                onClick = { onGeminiModelChange(GeminiCloudModel.FLASH_LITE_3_1) },
-                label = { Text("3.1 خفيف") }
+                selected = selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_5,
+                onClick = { onGeminiModelChange(GeminiCloudModel.FLASH_LITE_3_5) },
+                label = { Text("3.5 خفيف") }
             )
             FilterChip(
                 selected = selectedGeminiModel == GeminiCloudModel.FLASH_3_8,
@@ -869,7 +869,7 @@ fun HomeDashboard(
             )
         }
         Text(
-            if (selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_1) {
+            if (selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_5) {
                 "للعمل اليومي والطلبات الكثيرة"
             } else {
                 "للبرمجة والمهام الصعبة"
@@ -1481,9 +1481,9 @@ fun SettingsView(
         Spacer(modifier = Modifier.height(6.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(
-                selected = selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_1,
-                onClick = { onGeminiModelChange(GeminiCloudModel.FLASH_LITE_3_1) },
-                label = { Text("3.1 Flash-Lite") }
+                selected = selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_5,
+                onClick = { onGeminiModelChange(GeminiCloudModel.FLASH_LITE_3_5) },
+                label = { Text("3.5 Flash-Lite") }
             )
             FilterChip(
                 selected = selectedGeminiModel == GeminiCloudModel.FLASH_3_8,
@@ -1492,7 +1492,7 @@ fun SettingsView(
             )
         }
         Text(
-            if (selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_1) {
+            if (selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_5) {
                 "للعمل اليومي والطلبات الكثيرة."
             } else {
                 "للبرمجة والمهام الصعبة."
