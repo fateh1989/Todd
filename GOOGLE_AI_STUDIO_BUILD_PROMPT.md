@@ -381,3 +381,22 @@ Todd should feel like a personal intelligent presence on the phone:
 - never pretends success without evidence.
 
 Build the product around this behavior, not around a chat screen.
+
+
+---
+
+## Current continuation rules — 2026-10-05
+
+These rules override older implementation assumptions when they conflict with the current repository.
+
+1. Continue the existing Kotlin/Compose Android architecture. Do not restart Todd from scratch and do not replace it with a web wrapper.
+2. The owner manually chooses the cloud model according to need:
+   - Gemini 3.5 Flash-Lite for frequent/light work.
+   - Gemini 3.8 Flash for coding/difficult work.
+   Todd must not silently switch between them. Persist the owner's choice and use it for normal cloud text and autonomous coding.
+3. Preserve direct Gemini text chat. It already works without Firebase and uses the owner's locally stored Gemini API configuration.
+4. Preserve the direct Gemini Interactions tool path for Google Search, Android/device context, repository/workflow inspection, repository file listing/reading, autonomous coding, scheduling, task status and remote-job control.
+5. The existing voice path is separate and still requires real-device completion/verification. Do not regress text chat while fixing voice.
+6. Stable Android update signing is a release blocker. Before the next long-term owner-installable APK baseline, configure one permanent signing identity and verify it. Every later update must use the same identity so app data survives upgrades.
+7. Physical-device evidence currently reaches build 81 for real Gemini text chat and enabled Accessibility. Newer repository features are CI verified only until installed and tested on the owner's device.
+8. Follow PLAN → EXECUTE → VERIFY → RECORD. Green compilation proves buildability, not real-device behavior.
