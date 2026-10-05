@@ -1001,86 +1001,94 @@ fun HomeDashboard(
             }
         }
 
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(2.dp)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                // Apply the keyboard inset only to the composer. Applying it to the
+                // whole chat created a large empty gap; omitting it hid the composer.
+                .imePadding()
         ) {
-            TextButton(
-                onClick = {
-                    actionMode = if (actionMode == "TRANSLATION") "CHAT" else "TRANSLATION"
-                },
-                enabled = !isBusy,
-                contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
             ) {
-                Text(
-                    if (actionMode == "TRANSLATION") "محادثة الترجمة ✓" else "محادثة الترجمة",
-                    fontSize = 10.sp
-                )
-            }
-            TextButton(
-                onClick = {
-                    actionMode = if (actionMode == "REMOTE") "CHAT" else "REMOTE"
-                },
-                enabled = !isBusy,
-                contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
-            ) {
-                Text(
-                    if (actionMode == "REMOTE") "تحقق بعيد ✓" else "تحقق بعيد",
-                    fontSize = 10.sp
-                )
-            }
-            TextButton(
-                onClick = {
-                    actionMode = if (actionMode == "CODING") "CHAT" else "CODING"
-                },
-                enabled = !isBusy,
-                contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
-            ) {
-                Text(
-                    if (actionMode == "CODING") "برمجة ✓" else "برمجة",
-                    fontSize = 10.sp
-                )
-            }
-        }
-
-        OutlinedTextField(
-            value = quickInput,
-            onValueChange = { quickInput = it },
-            placeholder = {
-                Text(
-                    when (actionMode) {
-                        "TRANSLATION" -> "اكتب النص للترجمة..."
-                        "REMOTE" -> "اكتب ما تريد التحقق منه..."
-                        "CODING" -> "اكتب مهمة البرمجة..."
-                        else -> "اكتب لتود..."
-                    }
-                )
-            },
-            modifier = Modifier.fillMaxWidth(),
-            maxLines = 4,
-            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-            keyboardActions = KeyboardActions(
-                onSend = { submitCurrentInput() }
-            ),
-            trailingIcon = {
-                IconButton(
-                    onClick = { submitCurrentInput() },
-                    enabled = quickInput.isNotBlank() && !isBusy
+                TextButton(
+                    onClick = {
+                        actionMode = if (actionMode == "TRANSLATION") "CHAT" else "TRANSLATION"
+                    },
+                    enabled = !isBusy,
+                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
                 ) {
-                    Icon(
-                        Icons.Default.Send,
-                        contentDescription = "إرسال",
-                        modifier = Modifier.size(20.dp)
+                    Text(
+                        if (actionMode == "TRANSLATION") "محادثة الترجمة ✓" else "محادثة الترجمة",
+                        fontSize = 10.sp
                     )
                 }
-            },
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = Color(0xFF6366F1),
-                unfocusedBorderColor = Color(0xFF334155),
-                focusedTextColor = Color.White,
-                unfocusedTextColor = Color.White
+                TextButton(
+                    onClick = {
+                        actionMode = if (actionMode == "REMOTE") "CHAT" else "REMOTE"
+                    },
+                    enabled = !isBusy,
+                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
+                ) {
+                    Text(
+                        if (actionMode == "REMOTE") "تحقق بعيد ✓" else "تحقق بعيد",
+                        fontSize = 10.sp
+                    )
+                }
+                TextButton(
+                    onClick = {
+                        actionMode = if (actionMode == "CODING") "CHAT" else "CODING"
+                    },
+                    enabled = !isBusy,
+                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
+                ) {
+                    Text(
+                        if (actionMode == "CODING") "برمجة ✓" else "برمجة",
+                        fontSize = 10.sp
+                    )
+                }
+            }
+
+            OutlinedTextField(
+                value = quickInput,
+                onValueChange = { quickInput = it },
+                placeholder = {
+                    Text(
+                        when (actionMode) {
+                            "TRANSLATION" -> "اكتب النص للترجمة..."
+                            "REMOTE" -> "اكتب ما تريد التحقق منه..."
+                            "CODING" -> "اكتب مهمة البرمجة..."
+                            else -> "اكتب لتود..."
+                        }
+                    )
+                },
+                modifier = Modifier.fillMaxWidth(),
+                maxLines = 4,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(
+                    onSend = { submitCurrentInput() }
+                ),
+                trailingIcon = {
+                    IconButton(
+                        onClick = { submitCurrentInput() },
+                        enabled = quickInput.isNotBlank() && !isBusy
+                    ) {
+                        Icon(
+                            Icons.Default.Send,
+                            contentDescription = "إرسال",
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Color(0xFF6366F1),
+                    unfocusedBorderColor = Color(0xFF334155),
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                )
             )
-        )
+        }
     }
 }
 
