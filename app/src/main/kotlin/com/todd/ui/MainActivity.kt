@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardActions
@@ -224,6 +225,11 @@ fun ToddMainScreen(
                     (it.layer == MemoryLayer.PREFERENCES || it.layer == MemoryLayer.PROJECT)
             }
             .sortedByDescending { it.timestamp }
+    }
+    val codingLogs = remember(memories) {
+        memories
+            .filter { it.layer == MemoryLayer.TASK && it.key.startsWith("coding-log:") }
+            .sortedBy { it.timestamp }
     }
     var isChatBusy by remember { mutableStateOf(false) }
     var localAIStatus by remember { mutableStateOf("لم يتم فحص النموذج المحلي بعد") }
@@ -608,6 +614,7 @@ fun ToddMainScreen(
                 2 -> ActivityView(
                     tasks = tasks,
                     schedules = schedules,
+                    codingLogs = codingLogs,
                     onScheduleTask = { task, delayMinutes, repeatMinutes ->
                         scope.launch {
                             val now = System.currentTimeMillis()
@@ -1287,6 +1294,7 @@ fun ProjectsView(
 fun ActivityView(
     tasks: List<Task>,
     schedules: List<ScheduledTask>,
+    codingLogs: List<MemoryEntry>,
     onScheduleTask: (Task, Long, Long?) -> Unit,
     onPauseSchedule: (ScheduledTask) -> Unit,
     onResumeSchedule: (ScheduledTask) -> Unit,
@@ -1308,6 +1316,9 @@ fun ActivityView(
                 TaskStatus.PAUSED
             )
             val taskSchedules = schedules.filter { it.taskId == task.id }
+            val taskLog = codingLogs
+                .filter { it.key.startsWith("coding-log:${task.id}:") }
+                .takeLast(20)
 
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
@@ -1349,6 +1360,40 @@ fun ActivityView(
                     task.failureCause?.let {
                         Spacer(modifier = Modifier.height(3.dp))
                         Text("الخطأ: $it", fontSize = 11.sp, color = Color(0xFFFCA5A5))
+                    }
+
+                    if (taskLog.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Surface(
+                            color = Color(0xFF020617),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    "سجل التنفيذ المباشر",
+                                    color = Color(0xFF22C55E),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                taskLog.forEach { entry ->
+                                    val time = java.text.SimpleDateFormat(
+                                        "HH:mm:ss",
+                                        java.util.Locale.getDefault()
+                                    ).format(java.util.Date(entry.timestamp))
+                                    Text(
+                                        text = "[$time] > ${entry.value}",
+                                        color = Color(0xFFD1FAE5),
+                                        fontSize = 10.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+                        }
                     }
 
                     taskSchedules.forEach { schedule ->
