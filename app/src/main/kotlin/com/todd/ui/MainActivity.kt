@@ -166,6 +166,7 @@ fun ToddMainScreen(
 
     var selectedTab by remember { mutableStateOf(0) }
     val tasks by app.repository.getAllTasks().collectAsState(initial = emptyList())
+    val schedules by app.repository.getAllSchedules().collectAsState(initial = emptyList())
     val projects by app.repository.getAllProjects().collectAsState(initial = emptyList())
     val projectId = state.activeProjectId ?: "todd-main"
     val memories by app.repository.getMemoriesForProject(projectId).collectAsState(initial = emptyList())
@@ -481,6 +482,45 @@ fun ToddMainScreen(
                 )
                 2 -> ActivityView(
                     tasks = tasks,
+                    schedules = schedules,
+                    onScheduleTask = { task, delayMinutes, repeatMinutes ->
+                        scope.launch {
+                            val now = System.currentTimeMillis()
+                            val firstRun = now + java.util.concurrent.TimeUnit.MINUTES.toMillis(delayMinutes)
+                            val schedule = ScheduledTask(
+                                id = "schedule-${System.nanoTime()}",
+                                taskId = task.id,
+                                projectId = task.projectId,
+                                prompt = task.goal.ifBlank { task.title },
+                                firstRunAt = firstRun,
+                                intervalMinutes = repeatMinutes,
+                                nextRunAt = firstRun
+                            )
+                            app.taskScheduler.schedule(schedule)
+                            app.repository.updateTask(
+                                task.copy(
+                                    status = TaskStatus.WAITING,
+                                    isRecurring = repeatMinutes != null,
+                                    scheduledTime = firstRun,
+                                    currentStep = if (repeatMinutes == null) {
+                                        "مجدولة للتنفيذ لاحقاً."
+                                    } else {
+                                        "مجدولة للتكرار كل $repeatMinutes دقيقة."
+                                    },
+                                    updatedAt = now
+                                )
+                            )
+                        }
+                    },
+                    onPauseSchedule = { schedule ->
+                        scope.launch { app.taskScheduler.pause(schedule.id) }
+                    },
+                    onResumeSchedule = { schedule ->
+                        scope.launch { app.taskScheduler.resume(schedule.id) }
+                    },
+                    onCancelSchedule = { schedule ->
+                        scope.launch { app.taskScheduler.cancel(schedule.id) }
+                    },
                     onRefreshRemote = { task ->
                         scope.launch {
                             val result = app.remoteExecutor.reconnect(task.id)
@@ -1014,9 +1054,16 @@ fun ProjectsView(
 @Composable
 fun ActivityView(
     tasks: List<Task>,
+    schedules: List<ScheduledTask>,
+    onScheduleTask: (Task, Long, Long?) -> Unit,
+    onPauseSchedule: (ScheduledTask) -> Unit,
+    onResumeSchedule: (ScheduledTask) -> Unit,
+    onCancelSchedule: (ScheduledTask) -> Unit,
     onRefreshRemote: (Task) -> Unit,
     onCancelRemote: (Task) -> Unit
 ) {
+    var schedulingTask by remember { mutableStateOf<Task?>(null) }
+
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         items(tasks) { task ->
             val remoteActive = task.status in setOf(
@@ -1028,6 +1075,7 @@ fun ActivityView(
                 TaskStatus.BLOCKED,
                 TaskStatus.PAUSED
             )
+            val taskSchedules = schedules.filter { it.taskId == task.id }
 
             Card(
                 colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
@@ -1063,25 +1111,70 @@ fun ActivityView(
 
                     task.lastEvidence?.let {
                         Spacer(modifier = Modifier.height(3.dp))
-                        Text(
-                            "الدليل: $it",
-                            fontSize = 11.sp,
-                            color = Color(0xFF10B981)
-                        )
+                        Text("الدليل: $it", fontSize = 11.sp, color = Color(0xFF10B981))
                     }
 
                     task.failureCause?.let {
                         Spacer(modifier = Modifier.height(3.dp))
-                        Text(
-                            "الخطأ: $it",
-                            fontSize = 11.sp,
-                            color = Color(0xFFFCA5A5)
-                        )
+                        Text("الخطأ: $it", fontSize = 11.sp, color = Color(0xFFFCA5A5))
                     }
 
-                    if (remoteActive) {
+                    taskSchedules.forEach { schedule ->
                         Spacer(modifier = Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Surface(
+                            color = Color(0xFF0F172A),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                val next = schedule.nextRunAt?.let {
+                                    java.text.DateFormat.getDateTimeInstance(
+                                        java.text.DateFormat.SHORT,
+                                        java.text.DateFormat.SHORT
+                                    ).format(java.util.Date(it))
+                                } ?: "لا يوجد موعد تالٍ"
+
+                                Text(
+                                    if (schedule.intervalMinutes == null) {
+                                        "موعد واحد • $next"
+                                    } else {
+                                        "متكرر كل ${schedule.intervalMinutes} دقيقة • $next"
+                                    },
+                                    color = if (schedule.enabled) Color(0xFF93C5FD) else Color(0xFF94A3B8),
+                                    fontSize = 11.sp
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    if (schedule.enabled) {
+                                        TextButton(onClick = { onPauseSchedule(schedule) }) {
+                                            Text("إيقاف مؤقت")
+                                        }
+                                    } else {
+                                        TextButton(onClick = { onResumeSchedule(schedule) }) {
+                                            Text("استئناف")
+                                        }
+                                    }
+                                    TextButton(onClick = { onCancelSchedule(schedule) }) {
+                                        Text("إلغاء الجدولة")
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { schedulingTask = task }) {
+                            Icon(
+                                Icons.Default.Schedule,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text("جدولة")
+                        }
+
+                        if (remoteActive) {
                             OutlinedButton(onClick = { onRefreshRemote(task) }) {
                                 Icon(
                                     Icons.Default.Refresh,
@@ -1108,6 +1201,56 @@ fun ActivityView(
                 }
             }
         }
+    }
+
+    schedulingTask?.let { task ->
+        var delayText by remember(task.id) { mutableStateOf("60") }
+        var repeatText by remember(task.id) { mutableStateOf("") }
+
+        val delayMinutes = delayText.toLongOrNull()
+        val repeatMinutes = repeatText.toLongOrNull()
+        val repeatValid = repeatText.isBlank() || (repeatMinutes != null && repeatMinutes >= 15L)
+
+        AlertDialog(
+            onDismissRequest = { schedulingTask = null },
+            title = { Text("جدولة: ${task.title}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "WorkManager يشغّل العمل في الخلفية عند توفر الشبكة. المواعيد تقريبية وليست منبهاً دقيقاً بالثانية.",
+                        fontSize = 12.sp
+                    )
+                    OutlinedTextField(
+                        value = delayText,
+                        onValueChange = { delayText = it.filter(Char::isDigit) },
+                        label = { Text("ابدأ بعد كم دقيقة؟") },
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = repeatText,
+                        onValueChange = { repeatText = it.filter(Char::isDigit) },
+                        label = { Text("كرر كل كم دقيقة؟ اختياري، الحد الأدنى 15") },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onScheduleTask(task, delayMinutes!!, repeatMinutes)
+                        schedulingTask = null
+                    },
+                    enabled = delayMinutes != null && delayMinutes >= 0L && repeatValid
+                ) {
+                    Text("حفظ الجدولة")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { schedulingTask = null }) {
+                    Text("إلغاء")
+                }
+            }
+        )
     }
 }
 

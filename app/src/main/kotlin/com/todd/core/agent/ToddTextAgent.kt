@@ -22,6 +22,10 @@ import com.todd.core.rules.ActionCategory
 import com.todd.core.rules.ActionRequest
 import com.todd.core.rules.RulesEngine
 import com.todd.core.state.ToddStateMachine
+import com.todd.core.scheduler.ToddTaskScheduler
+import com.todd.core.model.ScheduledTask
+import com.todd.core.model.Task
+import com.todd.core.model.TaskStatus
 import com.todd.core.tools.GitHubTool
 import com.todd.data.repository.ToddRepository
 import com.todd.service.context.DeviceContextProvider
@@ -46,6 +50,7 @@ class ToddTextAgent(
     private val remoteExecutor: RemoteExecutor,
     private val autonomousTaskCoordinator: AutonomousTaskCoordinator,
     private val repository: ToddRepository,
+    private val taskScheduler: ToddTaskScheduler,
     private val stateMachine: ToddStateMachine,
     private val rulesEngine: RulesEngine,
     private val modelName: String = "gemini-3.8-flash"
@@ -218,6 +223,15 @@ class ToddTextAgent(
             )
         ),
         FunctionDeclaration(
+            "scheduleTask",
+            "Schedule a Todd task to run later. repeatMinutes is optional; recurring schedules must be at least 15 minutes apart.",
+            mapOf(
+                "objective" to Schema.string("What Todd should do at the scheduled time."),
+                "delayMinutes" to Schema.string("Minutes from now before the first run."),
+                "repeatMinutes" to Schema.string("Optional recurrence in minutes; blank for one-time.")
+            )
+        ),
+        FunctionDeclaration(
             "checkTaskStatus",
             "Read the durable Todd task state, current step, failure, and verification evidence for a task ID.",
             mapOf(
@@ -332,6 +346,80 @@ class ToddTextAgent(
                             put("taskId", taskId)
                             put("projectId", projectId)
                             put("status", "STARTED")
+                        }
+                    }
+                }
+            }
+
+            "scheduleTask" -> {
+                val objective = arg(call, "objective")
+                val delay = arg(call, "delayMinutes").toLongOrNull()
+                val repeat = arg(call, "repeatMinutes").toLongOrNull()
+                val projectId =
+                    stateMachine.state.value.activeProjectId ?: "todd-main"
+
+                when {
+                    objective.isBlank() -> buildJsonObject {
+                        put("ok", false)
+                        put("error", "Scheduled objective is required.")
+                    }
+
+                    delay == null || delay < 0L -> buildJsonObject {
+                        put("ok", false)
+                        put("error", "delayMinutes must be zero or greater.")
+                    }
+
+                    repeat != null && repeat < ToddTaskScheduler.MIN_PERIODIC_MINUTES ->
+                        buildJsonObject {
+                            put("ok", false)
+                            put(
+                                "error",
+                                "Recurring Todd schedules require at least ${ToddTaskScheduler.MIN_PERIODIC_MINUTES} minutes."
+                            )
+                        }
+
+                    else -> {
+                        val now = System.currentTimeMillis()
+                        val taskId = "scheduled-task-${System.nanoTime()}"
+                        val scheduleId = "schedule-${System.nanoTime()}"
+                        val firstRun = now + java.util.concurrent.TimeUnit.MINUTES.toMillis(delay)
+
+                        val task = Task(
+                            id = taskId,
+                            projectId = projectId,
+                            title = objective.take(120),
+                            goal = objective,
+                            userInstructions = objective,
+                            status = TaskStatus.WAITING,
+                            currentStep = if (repeat == null) {
+                                "مجدولة للتنفيذ لاحقاً."
+                            } else {
+                                "مجدولة للتكرار كل $repeat دقيقة."
+                            },
+                            completionCriteria = "Scheduled Todd execution produces a saved result.",
+                            isRecurring = repeat != null,
+                            scheduledTime = firstRun
+                        )
+                        repository.saveTask(task)
+
+                        taskScheduler.schedule(
+                            ScheduledTask(
+                                id = scheduleId,
+                                taskId = taskId,
+                                projectId = projectId,
+                                prompt = objective,
+                                firstRunAt = firstRun,
+                                intervalMinutes = repeat,
+                                nextRunAt = firstRun
+                            )
+                        )
+
+                        buildJsonObject {
+                            put("ok", true)
+                            put("taskId", taskId)
+                            put("scheduleId", scheduleId)
+                            put("firstRunAt", firstRun)
+                            put("repeatMinutes", repeat ?: 0L)
                         }
                     }
                 }

@@ -212,6 +212,7 @@ class ToddApplication : Application() {
             remoteExecutor = remoteExecutor,
             autonomousTaskCoordinator = autonomousTaskCoordinator,
             repository = repository,
+            taskScheduler = taskScheduler,
             stateMachine = stateMachine,
             rulesEngine = rulesEngine
         )
