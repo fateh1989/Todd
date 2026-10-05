@@ -1,6 +1,5 @@
 package com.todd.core.agent
 
-import com.todd.core.ai.FirebaseRuntimeConfig
 import com.todd.core.model.Task
 import com.todd.core.model.TaskStatus
 import com.todd.core.state.ToddStateMachine
@@ -149,17 +148,6 @@ class AutonomousTaskCoordinator(
                     } else {
                         "أضف تفويض GitHub من الإعدادات حتى يستطيع Todd قراءة وكتابة المستودع."
                     },
-                    updatedAt = System.currentTimeMillis()
-                )
-            )
-            return
-        }
-
-        if (!FirebaseRuntimeConfig.current().configured) {
-            repository.updateTask(
-                task.copy(
-                    status = TaskStatus.BLOCKED,
-                    currentStep = "نقطة الاستئناف محفوظة، لكن نسخة التطبيق تحتاج إعداد Firebase الحقيقي للذكاء السحابي.",
                     updatedAt = System.currentTimeMillis()
                 )
             )
