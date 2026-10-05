@@ -30,25 +30,40 @@ class AIRouter(
     }
 
     private suspend fun routeLocalThenCloud(request: AIRequest): Result<AIResponse> {
+        var localFailure: Throwable? = null
         if (localProvider.isAvailable()) {
             val localResult = localProvider.generateText(request)
             if (localResult.isSuccess) return localResult
+            localFailure = localResult.exceptionOrNull()
         }
 
         if (cloudProvider.isAvailable()) {
             val cloudResult = cloudProvider.generateText(request)
             if (cloudResult.isSuccess) return cloudResult
+            return cloudResult
         }
 
-        return localProvider.generateText(request)
+        return Result.failure(
+            localFailure ?: IllegalStateException("No configured AI provider is available.")
+        )
     }
 
     private suspend fun routeCloudThenLocal(request: AIRequest): Result<AIResponse> {
+        var cloudFailure: Throwable? = null
         if (cloudProvider.isAvailable()) {
             val cloudResult = cloudProvider.generateText(request)
             if (cloudResult.isSuccess) return cloudResult
+            cloudFailure = cloudResult.exceptionOrNull()
         }
 
-        return localProvider.generateText(request)
+        if (localProvider.isAvailable()) {
+            val localResult = localProvider.generateText(request)
+            if (localResult.isSuccess) return localResult
+            if (cloudFailure == null) return localResult
+        }
+
+        return Result.failure(
+            cloudFailure ?: IllegalStateException("No configured AI provider is available.")
+        )
     }
 }
