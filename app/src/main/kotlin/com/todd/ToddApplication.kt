@@ -24,6 +24,7 @@ import com.todd.core.agent.AndroidAutonomousCheckpointStore
 import com.todd.core.agent.AutonomousCheckpointStore
 import com.todd.core.model.Project
 import com.todd.core.model.TaskStatus
+import com.todd.service.recovery.AutonomousRecoveryScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -166,7 +167,10 @@ class ToddApplication : Application() {
             githubCredentialStore = githubCredentialStore,
             codingLoop = autonomousCodingLoop,
             checkpointStore = autonomousCheckpointStore,
-            scope = appScope
+            scope = appScope,
+            scheduleRecovery = {
+                AutonomousRecoveryScheduler.schedule(this@ToddApplication)
+            }
         )
 
         aiRouter = AIRouter(
@@ -187,7 +191,9 @@ class ToddApplication : Application() {
                     )
                 )
             }
-            autonomousTaskCoordinator.resumePending()
+            if (autonomousCheckpointStore.listPending().isNotEmpty()) {
+                AutonomousRecoveryScheduler.schedule(this@ToddApplication)
+            }
         }
     }
 
