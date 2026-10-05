@@ -11,10 +11,10 @@ class GeminiApiErrorMessagesTest {
         val message = GeminiApiErrorMessages.describe(
             statusCode = 429,
             apiMessage = "Resource exhausted",
-            modelName = "gemini-3.1-flash-lite"
+            modelName = "gemini-3.5-flash-lite"
         )
 
-        assertTrue(message.contains("Gemini 3.1 Flash-Lite"))
+        assertTrue(message.contains("Gemini 3.5 Flash-Lite"))
         assertTrue(message.contains("اختر النموذج الآخر"))
     }
 
