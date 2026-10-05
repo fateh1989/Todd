@@ -210,6 +210,9 @@ class DirectGeminiLiveWebSocketClient(
                     )
                 )
 
+            val liveTools = JSONArray()
+                .put(JSONObject().put("googleSearch", JSONObject()))
+
             if (tools.isNotEmpty()) {
                 val declarations = JSONArray()
                 tools.forEach { tool ->
@@ -220,13 +223,11 @@ class DirectGeminiLiveWebSocketClient(
                             .put("parameters", tool.parameters)
                     )
                 }
-                setupBody.put(
-                    "tools",
-                    JSONArray().put(
-                        JSONObject().put("functionDeclarations", declarations)
-                    )
+                liveTools.put(
+                    JSONObject().put("functionDeclarations", declarations)
                 )
             }
+            setupBody.put("tools", liveTools)
 
             val setup = JSONObject().put("setup", setupBody)
 
