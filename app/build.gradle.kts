@@ -6,6 +6,17 @@ plugins {
     alias(libs.plugins.google.services)
 }
 
+val toddCiVersionCode = System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull()
+val toddSigningStoreFile = System.getenv("TODD_SIGNING_STORE_FILE")
+val toddSigningStorePassword = System.getenv("TODD_SIGNING_STORE_PASSWORD")
+val toddSigningKeyAlias = System.getenv("TODD_SIGNING_KEY_ALIAS")
+val toddSigningKeyPassword = System.getenv("TODD_SIGNING_KEY_PASSWORD")
+val hasToddStableSigning =
+    !toddSigningStoreFile.isNullOrBlank() &&
+        !toddSigningStorePassword.isNullOrBlank() &&
+        !toddSigningKeyAlias.isNullOrBlank() &&
+        !toddSigningKeyPassword.isNullOrBlank()
+
 android {
     namespace = "com.todd"
     compileSdk = 35
@@ -14,15 +25,35 @@ android {
         applicationId = "com.todd"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = toddCiVersionCode ?: 1
+        versionName = if (toddCiVersionCode != null) {
+            "1.0.${toddCiVersionCode}"
+        } else {
+            "1.0.0"
+        }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    val toddStableSigningConfig = if (hasToddStableSigning) {
+        signingConfigs.create("toddStable") {
+            storeFile = file(toddSigningStoreFile!!)
+            storePassword = toddSigningStorePassword
+            keyAlias = toddSigningKeyAlias
+            keyPassword = toddSigningKeyPassword
+            enableV1Signing = true
+            enableV2Signing = true
+            enableV3Signing = true
+            enableV4Signing = true
+        }
+    } else {
+        null
     }
 
     buildTypes {
         debug {
             isDebuggable = true
+            toddStableSigningConfig?.let { signingConfig = it }
         }
         release {
             isMinifyEnabled = false
