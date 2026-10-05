@@ -18,6 +18,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.WindowManager
 import android.widget.Button
+import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -25,7 +26,9 @@ import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import com.todd.ToddApplication
 import com.todd.core.ai.GeminiLiveState
+import com.todd.core.ai.AIRequest
 import com.todd.service.context.DeviceContextProvider
+import com.todd.service.screen.ScreenCaptureStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -243,11 +246,11 @@ class FloatingToddService : Service() {
             panelWidth,
             WindowManager.LayoutParams.WRAP_CONTENT,
             overlayType(),
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
+            softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE
             x = ((buttonParams?.x ?: dp(12)) - panelWidth + dp(64))
                 .coerceIn(dp(12), maxOf(dp(12), screenWidth - panelWidth - dp(12)))
             y = ((buttonParams?.y ?: dp(120)) + dp(72))
@@ -339,6 +342,80 @@ class FloatingToddService : Service() {
             maxLines = 5
         }
         panel.addView(contextView)
+
+        val responseView = TextView(this).apply {
+            text = ""
+            textSize = 12f
+            setTextColor(Color.WHITE)
+            setPadding(0, dp(6), 0, dp(6))
+            maxLines = 7
+            visibility = View.GONE
+        }
+        panel.addView(responseView)
+
+        val quickInput = EditText(this).apply {
+            hint = "اسأل Todd عن هذه الشاشة..."
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            setHintTextColor(Color.rgb(148, 163, 184))
+            setSingleLine(false)
+            maxLines = 3
+            minHeight = dp(48)
+            setPadding(dp(10), dp(6), dp(10), dp(6))
+            background = GradientDrawable().apply {
+                shape = GradientDrawable.RECTANGLE
+                cornerRadius = dp(12).toFloat()
+                setColor(Color.rgb(30, 41, 59))
+                setStroke(dp(1), Color.rgb(71, 85, 105))
+            }
+        }
+        panel.addView(
+            quickInput,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.WRAP_CONTENT
+            ).apply {
+                setMargins(0, dp(4), 0, dp(6))
+            }
+        )
+
+        val sendQuick = Button(this).apply {
+            text = "إرسال إلى Todd"
+            setOnClickListener {
+                val prompt = quickInput.text?.toString()?.trim().orEmpty()
+                if (prompt.isBlank()) return@setOnClickListener
+
+                isEnabled = false
+                responseView.visibility = View.VISIBLE
+                responseView.text = "Todd يعمل..."
+                serviceScope.launch {
+                    val projectId =
+                        app.stateMachine.state.value.activeProjectId ?: "todd-main"
+                    val projectContext = app.repository.buildProjectContext(projectId)
+                    val currentContext = DeviceContextProvider.currentTextContext()
+
+                    val result = app.textAgent.respond(
+                        AIRequest(
+                            prompt = prompt,
+                            projectContext = projectContext,
+                            screenContext = currentContext.ifBlank { null },
+                            screenImagePath = ScreenCaptureStore.latestFile()?.absolutePath
+                        ),
+                        app.stateMachine.state.value.aiMode
+                    )
+
+                    responseView.text = result.fold(
+                        onSuccess = { it.text },
+                        onFailure = { "تعذر تنفيذ الطلب: ${it.message ?: "خطأ غير معروف"}" }
+                    )
+                    if (result.isSuccess) {
+                        quickInput.setText("")
+                    }
+                    isEnabled = true
+                }
+            }
+        }
+        panel.addView(sendQuick)
 
         val actions = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
