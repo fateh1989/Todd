@@ -173,6 +173,8 @@ fun ToddMainScreen(
     var isChatBusy by remember { mutableStateOf(false) }
     var localAIStatus by remember { mutableStateOf("لم يتم فحص النموذج المحلي بعد") }
     var localAIBusy by remember { mutableStateOf(false) }
+    var cloudAIStatus by remember { mutableStateOf("لم يتم اختبار الاتصال السحابي بعد") }
+    var cloudAIBusy by remember { mutableStateOf(false) }
     var firebaseRuntimeStatus by remember { mutableStateOf(FirebaseRuntimeConfig.current()) }
 
     Scaffold(
@@ -490,6 +492,38 @@ fun ToddMainScreen(
                     firebaseReason = firebaseRuntimeStatus.reason,
                     localAIStatus = localAIStatus,
                     localAIBusy = localAIBusy,
+                    cloudAIStatus = cloudAIStatus,
+                    cloudAIBusy = cloudAIBusy,
+                    onCheckCloudAI = {
+                        scope.launch {
+                            cloudAIBusy = true
+                            firebaseRuntimeStatus = FirebaseRuntimeConfig.current()
+                            cloudAIStatus = if (!firebaseRuntimeStatus.configured) {
+                                "أضف إعداد Firebase الحقيقي أولاً"
+                            } else {
+                                app.aiRouter.cloudProvider.generateText(
+                                    com.todd.core.ai.AIRequest(
+                                        prompt = "Reply with exactly: TODD_CLOUD_OK",
+                                        systemPrompt = "This is a Todd connectivity self-test. Do not add anything else.",
+                                        temperature = 0.0f,
+                                        maxTokens = 32
+                                    )
+                                ).fold(
+                                    onSuccess = { response ->
+                                        if (response.text.contains("TODD_CLOUD_OK")) {
+                                            "الاتصال السحابي الحقيقي يعمل"
+                                        } else {
+                                            "وصل Todd إلى النموذج السحابي واستلم رداً فعلياً"
+                                        }
+                                    },
+                                    onFailure = { error ->
+                                        "فشل الاتصال السحابي: ${error.message ?: "خطأ غير معروف"}"
+                                    }
+                                )
+                            }
+                            cloudAIBusy = false
+                        }
+                    },
                     onCheckLocalAI = {
                         scope.launch {
                             localAIBusy = true
@@ -530,6 +564,7 @@ fun ToddMainScreen(
                             )
                         }
                         if (result.isSuccess) {
+                            cloudAIStatus = "تم حفظ إعداد Firebase؛ اختبر الاتصال السحابي الآن"
                             app.autonomousTaskCoordinator.resumePending()
                         }
                     },
@@ -537,6 +572,7 @@ fun ToddMainScreen(
                         app.firebaseRuntimeCredentialStore.clear()
                         FirebaseRuntimeConfig.clearRuntimeApp()
                         firebaseRuntimeStatus = FirebaseRuntimeConfig.current()
+                        cloudAIStatus = "تم مسح إعداد Firebase المحلي"
                     },
                     onSaveGitHubToken = { token ->
                         app.githubCredentialStore.saveToken(token)
@@ -946,6 +982,9 @@ fun SettingsView(
     firebaseReason: String?,
     localAIStatus: String,
     localAIBusy: Boolean,
+    cloudAIStatus: String,
+    cloudAIBusy: Boolean,
+    onCheckCloudAI: () -> Unit,
     onCheckLocalAI: () -> Unit,
     onPrepareLocalAI: () -> Unit,
     onSaveFirebaseConfig: (String) -> Unit,
@@ -1031,6 +1070,22 @@ fun SettingsView(
             OutlinedButton(onClick = onClearFirebaseConfig) {
                 Text("مسح إعداد Firebase المحلي")
             }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+        Text(
+            "اختبار السحابي: $cloudAIStatus",
+            fontSize = 12.sp,
+            color = Color(0xFFCBD5E1)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        OutlinedButton(
+            onClick = onCheckCloudAI,
+            enabled = firebaseConfigured && !cloudAIBusy
+        ) {
+            Icon(Icons.Default.Cloud, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(5.dp))
+            Text(if (cloudAIBusy) "جارٍ الاختبار..." else "اختبار الاتصال السحابي")
         }
 
         Spacer(modifier = Modifier.height(10.dp))
