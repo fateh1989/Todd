@@ -312,6 +312,12 @@ fun ToddMainScreen(
                     voiceState = liveState,
                     voiceTranscripts = liveTranscripts,
                     voiceMuted = liveMuted,
+                    selectedGeminiModel = selectedGeminiModel,
+                    onGeminiModelChange = { model ->
+                        app.geminiModelPreferenceStore.set(model)
+                        selectedGeminiModel = model
+                        cloudAIStatus = "تم اختيار ${model.displayName}"
+                    },
                     onToggleVoice = {
                         if (liveState == GeminiLiveState.DISCONNECTED || liveState == GeminiLiveState.ERROR) {
                             onStartVoice()
@@ -792,6 +798,8 @@ fun HomeDashboard(
     voiceState: GeminiLiveState,
     voiceTranscripts: List<LiveTranscriptItem>,
     voiceMuted: Boolean,
+    selectedGeminiModel: GeminiCloudModel,
+    onGeminiModelChange: (GeminiCloudModel) -> Unit,
     onToggleVoice: () -> Unit,
     onToggleVoiceMute: () -> Unit,
     onSendMessage: (String) -> Unit,
@@ -817,6 +825,28 @@ fun HomeDashboard(
 
         Spacer(modifier = Modifier.height(12.dp))
         Text("محادثة Todd", fontWeight = FontWeight.Bold, color = Color.White)
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_5,
+                onClick = { onGeminiModelChange(GeminiCloudModel.FLASH_LITE_3_5) },
+                label = { Text("3.5 خفيف") }
+            )
+            FilterChip(
+                selected = selectedGeminiModel == GeminiCloudModel.FLASH_3_8,
+                onClick = { onGeminiModelChange(GeminiCloudModel.FLASH_3_8) },
+                label = { Text("3.8 قوي") }
+            )
+        }
+        Text(
+            if (selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_5) {
+                "للعمل اليومي والطلبات الكثيرة"
+            } else {
+                "للبرمجة والمهام الصعبة"
+            },
+            fontSize = 11.sp,
+            color = Color(0xFF94A3B8)
+        )
         Spacer(modifier = Modifier.height(8.dp))
 
         LazyColumn(
