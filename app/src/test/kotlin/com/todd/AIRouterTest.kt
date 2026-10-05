@@ -88,6 +88,22 @@ class AIRouterTest {
     }
 
     @Test
+    fun `cloud preferred preserves cloud failure when local is unavailable`() = runBlocking {
+        val router = AIRouter(
+            localProvider = FailingLocalProvider(),
+            cloudProvider = FailingCloudProvider()
+        )
+
+        val result = router.route(
+            AIRequest(prompt = "hello"),
+            AIProviderMode.CLOUD_PREFERRED
+        )
+
+        assertTrue(result.isFailure)
+        assertEquals("cloud unavailable", result.exceptionOrNull()?.message)
+    }
+
+    @Test
     fun `local only mode never falls back to cloud when local provider is unavailable`() = runBlocking {
         val router = AIRouter(
             localProvider = FailingLocalProvider(),
