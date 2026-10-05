@@ -18,6 +18,7 @@ import com.todd.core.remote.GitHubActionsRemoteExecutor
 import com.todd.core.remote.GitHubActionsRemoteGateway
 import com.todd.core.remote.RemoteExecutor
 import com.todd.core.remote.RemoteJobStatus
+import com.todd.core.agent.AutonomousCodingLoop
 import com.todd.core.model.Project
 import com.todd.core.model.TaskStatus
 import kotlinx.coroutines.CoroutineScope
@@ -57,6 +58,9 @@ class ToddApplication : Application() {
         private set
 
     lateinit var remoteExecutor: RemoteExecutor
+        private set
+
+    lateinit var autonomousCodingLoop: AutonomousCodingLoop
         private set
 
     override fun onCreate() {
@@ -139,6 +143,12 @@ class ToddApplication : Application() {
         // Cloud provider: current Firebase AI Logic using the Gemini Developer API backend
         // Credentials are secure and managed via Firebase project configuration (no hardcoded keys)
         val geminiProvider = GeminiAIProvider(modelName = "gemini-3.8-flash")
+
+        autonomousCodingLoop = AutonomousCodingLoop(
+            aiProvider = geminiProvider,
+            githubTool = githubTool,
+            remoteExecutor = remoteExecutor
+        )
 
         aiRouter = AIRouter(
             localProvider = localProvider,
