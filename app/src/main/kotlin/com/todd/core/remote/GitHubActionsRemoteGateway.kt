@@ -16,6 +16,11 @@ class GitHubActionsRemoteGateway(
     private val apiBaseUrl: String = "https://api.github.com"
 ) : RemoteExecutionGateway {
 
+    override suspend fun findExisting(jobId: String): Result<RemoteDispatchReceipt?> = runCatching {
+        val token = requiredToken()
+        findMatchingRun(jobId, token)
+    }
+
     override suspend fun dispatch(request: RemoteJobRequest): Result<RemoteDispatchReceipt> = runCatching {
         val token = requiredToken()
 
@@ -41,24 +46,9 @@ class GitHubActionsRemoteGateway(
             token = token
         )
 
-        val title = "Todd Remote ${request.jobId}"
         repeat(30) {
             delay(700)
-            val runs = requestJson(
-                "GET",
-                "/repos/${repoPath(controlRepository)}/actions/workflows/${encode(workflowFile)}/runs?event=workflow_dispatch&per_page=30",
-                token = token
-            ).getJSONArray("workflow_runs")
-
-            for (i in 0 until runs.length()) {
-                val run = runs.getJSONObject(i)
-                if (run.optString("display_title") == title) {
-                    return@runCatching RemoteDispatchReceipt(
-                        runId = run.getLong("id"),
-                        runUrl = run.getString("html_url")
-                    )
-                }
-            }
+            findMatchingRun(request.jobId, token)?.let { return@runCatching it }
         }
 
         throw IllegalStateException(
@@ -133,6 +123,29 @@ class GitHubActionsRemoteGateway(
             token = token
         )
         true
+    }
+
+    private suspend fun findMatchingRun(
+        jobId: String,
+        token: String
+    ): RemoteDispatchReceipt? {
+        val title = "Todd Remote $jobId"
+        val runs = requestJson(
+            "GET",
+            "/repos/${repoPath(controlRepository)}/actions/workflows/${encode(workflowFile)}/runs?event=workflow_dispatch&per_page=100",
+            token = token
+        ).getJSONArray("workflow_runs")
+
+        for (i in 0 until runs.length()) {
+            val run = runs.getJSONObject(i)
+            if (run.optString("display_title") == title) {
+                return RemoteDispatchReceipt(
+                    runId = run.getLong("id"),
+                    runUrl = run.getString("html_url")
+                )
+            }
+        }
+        return null
     }
 
     private fun requiredToken(): String =

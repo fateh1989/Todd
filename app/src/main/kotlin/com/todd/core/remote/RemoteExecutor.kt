@@ -101,6 +101,7 @@ data class StoredRemoteJob(
 )
 
 interface RemoteExecutionGateway {
+    suspend fun findExisting(jobId: String): Result<RemoteDispatchReceipt?>
     suspend fun dispatch(request: RemoteJobRequest): Result<RemoteDispatchReceipt>
     suspend fun getRun(runId: Long): Result<RemoteRunSnapshot>
     suspend fun cancel(runId: Long): Result<Boolean>
@@ -147,7 +148,13 @@ class GitHubActionsRemoteExecutor(
             return Result.failure(IllegalArgumentException("Remote branch is required."))
         }
 
-        val initial = RemoteJobState(
+        val stored = store.load(request.jobId)
+        if (stored?.state?.providerRunId != null) {
+            startPolling(request.jobId)
+            return Result.success(request.jobId)
+        }
+
+        val initial = stored?.state ?: RemoteJobState(
             jobId = request.jobId,
             status = RemoteJobStatus.SUBMITTED,
             currentStepDescription = "Submitting verified remote job for ${request.repository}@${request.branch}",
@@ -157,7 +164,17 @@ class GitHubActionsRemoteExecutor(
         )
         publish(request, initial)
 
-        val receipt = gateway.dispatch(request).getOrElse { error ->
+        val recovered = gateway.findExisting(request.jobId).getOrElse { error ->
+            val degraded = initial.copy(
+                currentStepDescription = "Could not check for an existing remote run before dispatch",
+                failureMessage = error.message,
+                lastHeartbeat = System.currentTimeMillis()
+            )
+            publish(request, degraded)
+            return Result.failure(error)
+        }
+
+        val receipt = recovered ?: gateway.dispatch(request).getOrElse { error ->
             val failed = initial.copy(
                 status = RemoteJobStatus.FAILED,
                 currentStepDescription = "Remote dispatch failed",
@@ -171,9 +188,14 @@ class GitHubActionsRemoteExecutor(
 
         val submitted = initial.copy(
             status = RemoteJobStatus.CONNECTING,
-            currentStepDescription = "Remote worker accepted the job; waiting for runner",
+            currentStepDescription = if (recovered != null) {
+                "Recovered existing remote worker run; reconnecting"
+            } else {
+                "Remote worker accepted the job; waiting for runner"
+            },
             providerRunId = receipt.runId,
             providerRunUrl = receipt.runUrl,
+            failureMessage = null,
             lastHeartbeat = System.currentTimeMillis()
         )
         publish(request, submitted)

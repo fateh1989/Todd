@@ -76,6 +76,35 @@ class RemoteExecutorTest {
     }
 
     @Test
+    fun `real executor recovers existing provider run without duplicate dispatch`() = runBlocking {
+        val gateway = FakeGateway().apply {
+            existing = RemoteDispatchReceipt(
+                runId = 777L,
+                runUrl = "https://github.com/fateh1989/Todd/actions/runs/777"
+            )
+        }
+        val executor = GitHubActionsRemoteExecutor(
+            gateway = gateway,
+            store = InMemoryRemoteJobStore(),
+            pollIntervalMs = 60_000L
+        )
+
+        val request = RemoteJobRequest(
+            jobId = "remote-recover-1",
+            projectId = "todd-main",
+            repository = "fateh1989/Todd",
+            branch = "main",
+            startCommit = "abc123",
+            objective = "verify",
+            completionCriteria = "green"
+        )
+
+        assertEquals("remote-recover-1", executor.startJob(request).getOrThrow())
+        assertEquals(0, gateway.dispatchCount)
+        assertEquals(777L, executor.reconnect("remote-recover-1").getOrThrow().providerRunId)
+    }
+
+    @Test
     fun `real executor does not pretend GitHub Actions can pause`() = runBlocking {
         val executor = GitHubActionsRemoteExecutor(
             gateway = FakeGateway(),
@@ -100,6 +129,9 @@ class RemoteExecutorTest {
     }
 
     private class FakeGateway : RemoteExecutionGateway {
+        var existing: RemoteDispatchReceipt? = null
+        var dispatchCount: Int = 0
+
         var snapshot = RemoteRunSnapshot(
             runId = 991L,
             runUrl = "https://github.com/fateh1989/Todd/actions/runs/991",
@@ -109,13 +141,18 @@ class RemoteExecutorTest {
             artifactNames = emptyList()
         )
 
-        override suspend fun dispatch(request: RemoteJobRequest): Result<RemoteDispatchReceipt> =
-            Result.success(
+        override suspend fun findExisting(jobId: String): Result<RemoteDispatchReceipt?> =
+            Result.success(existing)
+
+        override suspend fun dispatch(request: RemoteJobRequest): Result<RemoteDispatchReceipt> {
+            dispatchCount += 1
+            return Result.success(
                 RemoteDispatchReceipt(
                     runId = 991L,
                     runUrl = "https://github.com/fateh1989/Todd/actions/runs/991"
                 )
             )
+        }
 
         override suspend fun getRun(runId: Long): Result<RemoteRunSnapshot> =
             Result.success(snapshot)
