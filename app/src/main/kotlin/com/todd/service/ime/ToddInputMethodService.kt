@@ -304,7 +304,10 @@ class ToddInputMethodService : InputMethodService() {
                     projectContext = memoryContext
                 )
 
-                val result = app.aiRouter.route(request, app.stateMachine.state.value.aiMode)
+                val result = app.textAgent.respond(
+                    request,
+                    app.stateMachine.state.value.aiMode
+                )
                 result.onSuccess { response ->
                     ic.commitText(response.text, 1)
                 }.onFailure { err ->
