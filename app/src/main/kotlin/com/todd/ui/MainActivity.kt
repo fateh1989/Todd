@@ -306,7 +306,7 @@ fun ToddMainScreen(
                                     userMessage = message
                                 )
 
-                                val result = app.aiRouter.route(
+                                val result = app.textAgent.respond(
                                     com.todd.core.ai.AIRequest(
                                         prompt = message,
                                         projectContext = contextBeforeMessage,

@@ -24,6 +24,7 @@ import com.todd.core.agent.AutonomousCodingLoop
 import com.todd.core.agent.AutonomousTaskCoordinator
 import com.todd.core.agent.AndroidAutonomousCheckpointStore
 import com.todd.core.agent.AutonomousCheckpointStore
+import com.todd.core.agent.ToddTextAgent
 import com.todd.core.model.Project
 import com.todd.core.model.TaskStatus
 import com.todd.service.recovery.AutonomousRecoveryScheduler
@@ -43,6 +44,9 @@ class ToddApplication : Application() {
         private set
 
     lateinit var aiRouter: AIRouter
+        private set
+
+    lateinit var textAgent: ToddTextAgent
         private set
 
     lateinit var stateMachine: ToddStateMachine
@@ -185,6 +189,14 @@ class ToddApplication : Application() {
         aiRouter = AIRouter(
             localProvider = localProvider,
             cloudProvider = geminiProvider
+        )
+        textAgent = ToddTextAgent(
+            aiRouter = aiRouter,
+            githubTool = githubTool,
+            remoteExecutor = remoteExecutor,
+            autonomousTaskCoordinator = autonomousTaskCoordinator,
+            stateMachine = stateMachine,
+            rulesEngine = rulesEngine
         )
 
         appScope.launch {

@@ -1,0 +1,391 @@
+package com.todd.core.agent
+
+import android.graphics.BitmapFactory
+import com.google.firebase.Firebase
+import com.google.firebase.ai.ai
+import com.google.firebase.ai.type.FunctionCallPart
+import com.google.firebase.ai.type.FunctionDeclaration
+import com.google.firebase.ai.type.FunctionResponsePart
+import com.google.firebase.ai.type.GenerativeBackend
+import com.google.firebase.ai.type.Schema
+import com.google.firebase.ai.type.Tool
+import com.google.firebase.ai.type.content
+import com.todd.core.ai.AIRequest
+import com.todd.core.ai.AIResponse
+import com.todd.core.ai.AIRouter
+import com.todd.core.ai.AISource
+import com.todd.core.ai.FirebaseRuntimeConfig
+import com.todd.core.ai.ProviderType
+import com.todd.core.model.AIProviderMode
+import com.todd.core.remote.RemoteExecutor
+import com.todd.core.rules.ActionCategory
+import com.todd.core.rules.ActionRequest
+import com.todd.core.rules.RulesEngine
+import com.todd.core.state.ToddStateMachine
+import com.todd.core.tools.GitHubTool
+import com.todd.service.context.DeviceContextProvider
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.put
+import java.io.File
+
+/**
+ * Tool-capable text agent for the main Todd chat.
+ *
+ * Unlike a plain text completion, this agent can decide to read GitHub state, inspect the
+ * current phone context, start autonomous coding, and reconnect/cancel remote verification
+ * jobs. Tool results are sent back to Gemini before Todd produces the user-visible answer.
+ */
+class ToddTextAgent(
+    private val aiRouter: AIRouter,
+    private val githubTool: GitHubTool,
+    private val remoteExecutor: RemoteExecutor,
+    private val autonomousTaskCoordinator: AutonomousTaskCoordinator,
+    private val stateMachine: ToddStateMachine,
+    private val rulesEngine: RulesEngine,
+    private val modelName: String = "gemini-3.8-flash"
+) {
+
+    suspend fun respond(
+        request: AIRequest,
+        mode: AIProviderMode
+    ): Result<AIResponse> = withContext(Dispatchers.IO) {
+        if (mode == AIProviderMode.LOCAL_ONLY || !FirebaseRuntimeConfig.current().configured) {
+            return@withContext aiRouter.route(request, mode)
+        }
+
+        val startedAt = System.currentTimeMillis()
+
+        try {
+            val model = Firebase.ai(
+                app = FirebaseRuntimeConfig.requireConfiguredApp(),
+                backend = GenerativeBackend.googleAI()
+            ).generativeModel(
+                modelName = modelName,
+                tools = listOf(
+                    Tool.googleSearch(),
+                    Tool.functionDeclarations(toolDeclarations())
+                )
+            )
+            val chat = model.startChat()
+
+            val prompt = buildPrompt(request)
+            var response = sendInitialMessage(chat, prompt, request.screenImagePath)
+
+            repeat(MAX_TOOL_ROUNDS) {
+                val calls = response.functionCalls
+                if (calls.isEmpty()) {
+                    val text = response.text
+                        ?: return@withContext Result.failure(
+                            IllegalStateException("Todd received an empty model response.")
+                        )
+
+                    val sources = response.candidates
+                        .firstOrNull()
+                        ?.groundingMetadata
+                        ?.groundingChunks
+                        ?.mapNotNull { chunk ->
+                            val web = chunk.web ?: return@mapNotNull null
+                            val uri = web.uri?.takeIf { it.isNotBlank() }
+                                ?: return@mapNotNull null
+                            AISource(
+                                title = web.title?.takeIf { it.isNotBlank() },
+                                url = uri,
+                                domain = web.domain?.takeIf { it.isNotBlank() }
+                            )
+                        }
+                        ?.distinctBy { it.url }
+                        .orEmpty()
+
+                    return@withContext Result.success(
+                        AIResponse(
+                            text = text,
+                            providerUsed = ProviderType.CLOUD_GEMINI,
+                            isVerified = false,
+                            tokensUsed = (prompt.length + text.length) / 4,
+                            latencyMs = System.currentTimeMillis() - startedAt,
+                            sources = sources
+                        )
+                    )
+                }
+
+                val functionResponses = calls.map { call ->
+                    executeTool(call)
+                }
+
+                response = chat.sendMessage(
+                    content("function") {
+                        functionResponses.forEach { part(it) }
+                    }
+                )
+            }
+
+            Result.failure(
+                IllegalStateException(
+                    "Todd exceeded the maximum number of tool-call rounds without a final answer."
+                )
+            )
+        } catch (e: Exception) {
+            val fallback = aiRouter.route(request, mode)
+            if (fallback.isSuccess) fallback else Result.failure(e)
+        }
+    }
+
+    private suspend fun sendInitialMessage(
+        chat: com.google.firebase.ai.Chat,
+        prompt: String,
+        imagePath: String?
+    ): com.google.firebase.ai.type.GenerateContentResponse {
+        if (imagePath.isNullOrBlank()) return chat.sendMessage(prompt)
+
+        val file = File(imagePath)
+        if (!file.exists()) return chat.sendMessage(prompt)
+
+        val bitmap = BitmapFactory.decodeFile(file.absolutePath)
+            ?: return chat.sendMessage(prompt)
+
+        return try {
+            chat.sendMessage(
+                content("user") {
+                    image(bitmap)
+                    text(prompt)
+                }
+            )
+        } finally {
+            bitmap.recycle()
+        }
+    }
+
+    private fun buildPrompt(request: AIRequest): String = buildString {
+        appendLine(
+            "You are Todd, a persistent Android personal agent. " +
+                "Use tools when they provide real evidence or when the user's request asks for an action. " +
+                "Never say an external action succeeded unless a tool result proves it."
+        )
+        request.systemPrompt?.let { appendLine("System: $it") }
+        request.projectContext?.let {
+            appendLine()
+            appendLine("Project context:")
+            appendLine(it)
+        }
+        request.screenContext?.let {
+            appendLine()
+            appendLine("Current device context:")
+            appendLine(it)
+        }
+        request.selectedText?.let {
+            appendLine()
+            appendLine("Selected text:")
+            appendLine(it)
+        }
+        appendLine()
+        appendLine("User request:")
+        append(request.prompt)
+    }
+
+    private fun toolDeclarations(): List<FunctionDeclaration> = listOf(
+        FunctionDeclaration(
+            "getCurrentDeviceContext",
+            "Read Todd's current merged phone context: accessibility screen data, local OCR, visual capture metadata, and recent notifications.",
+            emptyMap()
+        ),
+        FunctionDeclaration(
+            "checkRepositoryStatus",
+            "Read the live branch and latest commit for a GitHub repository.",
+            mapOf(
+                "repository" to Schema.string("Repository in owner/name form."),
+                "branch" to Schema.string("Branch name, normally main.")
+            )
+        ),
+        FunctionDeclaration(
+            "checkLatestWorkflow",
+            "Read the latest GitHub Actions workflow run and artifact for a repository branch.",
+            mapOf(
+                "repository" to Schema.string("Repository in owner/name form."),
+                "branch" to Schema.string("Branch name, normally main.")
+            )
+        ),
+        FunctionDeclaration(
+            "startAutonomousCoding",
+            "Start Todd's persistent autonomous coding loop for the current project. Use this when the user asks Todd to implement, fix, change, or build code.",
+            mapOf(
+                "objective" to Schema.string("Exact coding objective from the user.")
+            )
+        ),
+        FunctionDeclaration(
+            "checkRemoteJob",
+            "Reconnect to a Todd remote verification job and return its live status and evidence.",
+            mapOf(
+                "jobId" to Schema.string("Todd remote job ID.")
+            )
+        ),
+        FunctionDeclaration(
+            "cancelRemoteJob",
+            "Cancel a Todd remote verification job when the user asked to cancel it.",
+            mapOf(
+                "jobId" to Schema.string("Todd remote job ID.")
+            )
+        )
+    )
+
+    private suspend fun executeTool(call: FunctionCallPart): FunctionResponsePart {
+        val response: JsonObject = when (call.name) {
+            "getCurrentDeviceContext" -> buildJsonObject {
+                put("ok", true)
+                put("context", DeviceContextProvider.currentTextContext())
+            }
+
+            "checkRepositoryStatus" -> {
+                val repo = arg(call, "repository").ifBlank { "fateh1989/Todd" }
+                val branch = arg(call, "branch").ifBlank { "main" }
+
+                githubTool.getRepositoryInfo(repo, branch).fold(
+                    onSuccess = { info ->
+                        buildJsonObject {
+                            put("ok", true)
+                            put("repository", info.fullName)
+                            put("branch", info.activeBranch)
+                            put("defaultBranch", info.defaultBranch)
+                            put("latestCommit", info.latestCommitSha)
+                        }
+                    },
+                    onFailure = { error -> errorJson(error) }
+                )
+            }
+
+            "checkLatestWorkflow" -> {
+                val repo = arg(call, "repository").ifBlank { "fateh1989/Todd" }
+                val branch = arg(call, "branch").ifBlank { "main" }
+
+                githubTool.getLatestWorkflowRun(repo, branch).fold(
+                    onSuccess = { run ->
+                        buildJsonObject {
+                            put("ok", true)
+                            put("found", run != null)
+                            if (run != null) {
+                                put("runId", run.runId)
+                                put("workflow", run.workflowName)
+                                put("headSha", run.headSha)
+                                put("status", run.status)
+                                put("conclusion", run.conclusion ?: "")
+                                put("artifact", run.artifactName ?: "")
+                            }
+                        }
+                    },
+                    onFailure = { error -> errorJson(error) }
+                )
+            }
+
+            "startAutonomousCoding" -> {
+                val objective = arg(call, "objective")
+                if (objective.isBlank()) {
+                    buildJsonObject {
+                        put("ok", false)
+                        put("error", "Coding objective is required.")
+                    }
+                } else {
+                    val evaluation = rulesEngine.evaluate(
+                        ActionRequest(
+                            category = ActionCategory.RUN_SHELL_COMMAND,
+                            projectId = stateMachine.state.value.activeProjectId ?: "todd-main",
+                            target = "autonomous-coding",
+                            dataSummary = objective,
+                            isPreApprovedInInstruction = true
+                        )
+                    )
+
+                    if (!evaluation.isAllowed) {
+                        buildJsonObject {
+                            put("ok", false)
+                            put("error", evaluation.promptMessage ?: "Action was not approved.")
+                        }
+                    } else {
+                        val projectId =
+                            stateMachine.state.value.activeProjectId ?: "todd-main"
+                        val taskId = autonomousTaskCoordinator.start(
+                            projectId = projectId,
+                            title = objective.take(120),
+                            goal = objective,
+                            maxIterations = 4
+                        )
+                        buildJsonObject {
+                            put("ok", true)
+                            put("taskId", taskId)
+                            put("projectId", projectId)
+                            put("status", "STARTED")
+                        }
+                    }
+                }
+            }
+
+            "checkRemoteJob" -> {
+                val jobId = arg(call, "jobId")
+                if (jobId.isBlank()) {
+                    buildJsonObject {
+                        put("ok", false)
+                        put("error", "jobId is required.")
+                    }
+                } else {
+                    remoteExecutor.reconnect(jobId).fold(
+                        onSuccess = { state ->
+                            buildJsonObject {
+                                put("ok", true)
+                                put("jobId", state.jobId)
+                                put("status", state.status.name)
+                                put("step", state.currentStepDescription)
+                                put("runId", state.providerRunId ?: 0L)
+                                put("runUrl", state.providerRunUrl ?: "")
+                                put("artifacts", state.artifactNames.joinToString("\n"))
+                                put("failure", state.failureMessage ?: "")
+                            }
+                        },
+                        onFailure = { error -> errorJson(error) }
+                    )
+                }
+            }
+
+            "cancelRemoteJob" -> {
+                val jobId = arg(call, "jobId")
+                if (jobId.isBlank()) {
+                    buildJsonObject {
+                        put("ok", false)
+                        put("error", "jobId is required.")
+                    }
+                } else {
+                    remoteExecutor.requestCancel(jobId).fold(
+                        onSuccess = { accepted ->
+                            buildJsonObject {
+                                put("ok", accepted)
+                                put("jobId", jobId)
+                                put("cancelRequested", accepted)
+                            }
+                        },
+                        onFailure = { error -> errorJson(error) }
+                    )
+                }
+            }
+
+            else -> buildJsonObject {
+                put("ok", false)
+                put("error", "Unknown Todd tool: ${call.name}")
+            }
+        }
+
+        return FunctionResponsePart(call.name, response, call.id)
+    }
+
+    private fun arg(call: FunctionCallPart, name: String): String =
+        call.args[name]?.jsonPrimitive?.content?.trim().orEmpty()
+
+    private fun errorJson(error: Throwable): JsonObject = buildJsonObject {
+        put("ok", false)
+        put("error", error.message ?: error::class.java.simpleName)
+    }
+
+    companion object {
+        private const val MAX_TOOL_ROUNDS = 6
+    }
+}
