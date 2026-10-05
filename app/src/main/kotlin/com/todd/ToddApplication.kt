@@ -41,6 +41,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.collect
 
 class ToddApplication : Application() {
 
@@ -137,6 +138,11 @@ class ToddApplication : Application() {
         githubTool = GitHubRestTool(tokenProvider = { githubCredentialStore.getToken() })
         autonomousCheckpointStore = AndroidAutonomousCheckpointStore(this)
         rulesEngine = RulesEngine()
+        appScope.launch {
+            repository.getActiveRules().collect { activeRules ->
+                rulesEngine.replaceCustomRules(activeRules)
+            }
+        }
         remoteExecutor = GitHubActionsRemoteExecutor(
             gateway = GitHubActionsRemoteGateway(
                 tokenProvider = { githubCredentialStore.getToken() }

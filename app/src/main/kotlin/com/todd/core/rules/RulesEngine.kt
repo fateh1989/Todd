@@ -30,7 +30,14 @@ data class EvaluationResult(
     val isAllowed: Boolean
 )
 
-class RulesEngine(private val customRules: List<Rule> = emptyList()) {
+class RulesEngine(initialRules: List<Rule> = emptyList()) {
+
+    @Volatile
+    private var customRules: List<Rule> = initialRules.toList()
+
+    fun replaceCustomRules(rules: List<Rule>) {
+        customRules = rules.toList()
+    }
 
     fun evaluate(request: ActionRequest): EvaluationResult {
         // Built-in hard safety rules cannot be bypassed by custom rules
@@ -96,7 +103,7 @@ class RulesEngine(private val customRules: List<Rule> = emptyList()) {
             ActionCategory.GIT_COMMIT_FEATURE_BRANCH -> RuleBehavior.ALLOW_IF_PREAPPROVED
             ActionCategory.GIT_PUSH_MAIN -> RuleBehavior.ASK_BEFORE_ACTION
             ActionCategory.SEND_COMMUNICATION -> RuleBehavior.ASK_BEFORE_ACTION
-            ActionCategory.UPLOAD_SCREENSHOT_CLOUD -> RuleBehavior.ASK_BEFORE_ACTION
+            ActionCategory.UPLOAD_SCREENSHOT_CLOUD -> RuleBehavior.ALLOW_IF_PREAPPROVED
             ActionCategory.RUN_SHELL_COMMAND -> RuleBehavior.ALLOW_IF_PREAPPROVED
             else -> RuleBehavior.ASK_BEFORE_ACTION
         }
