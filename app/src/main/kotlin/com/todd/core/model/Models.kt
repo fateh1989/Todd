@@ -83,6 +83,21 @@ data class Task(
     val updatedAt: Long = System.currentTimeMillis()
 )
 
+@Entity(tableName = "scheduled_tasks")
+data class ScheduledTask(
+    @PrimaryKey val id: String,
+    val taskId: String,
+    val projectId: String,
+    val prompt: String,
+    val firstRunAt: Long,
+    val intervalMinutes: Long? = null,
+    val enabled: Boolean = true,
+    val lastRunAt: Long? = null,
+    val nextRunAt: Long? = firstRunAt,
+    val createdAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis()
+)
+
 @Entity(tableName = "memories")
 data class MemoryEntry(
     @PrimaryKey val id: String,

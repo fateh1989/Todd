@@ -30,6 +30,7 @@ import com.todd.core.model.Project
 import com.todd.core.model.TaskStatus
 import com.todd.core.project.ActiveProjectStore
 import com.todd.service.recovery.AutonomousRecoveryScheduler
+import com.todd.core.scheduler.ToddTaskScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -52,6 +53,9 @@ class ToddApplication : Application() {
         private set
 
     lateinit var diagnostics: ToddDiagnostics
+        private set
+
+    lateinit var taskScheduler: ToddTaskScheduler
         private set
 
     lateinit var stateMachine: ToddStateMachine
@@ -98,6 +102,7 @@ class ToddApplication : Application() {
         repository = ToddRepository(database)
         memoryLearningEngine = MemoryLearningEngine(repository)
         stateMachine = ToddStateMachine(repository)
+        taskScheduler = ToddTaskScheduler(this)
         activeProjectStore = ActiveProjectStore(this)
         activeProjectStore.get()?.let(stateMachine::setActiveProject)
         githubCredentialStore = GitHubCredentialStore(this)
@@ -234,6 +239,7 @@ class ToddApplication : Application() {
             if (autonomousCheckpointStore.listPending().isNotEmpty()) {
                 AutonomousRecoveryScheduler.schedule(this@ToddApplication)
             }
+            taskScheduler.reconcile()
         }
     }
 

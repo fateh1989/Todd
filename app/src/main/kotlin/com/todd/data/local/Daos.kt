@@ -67,6 +67,27 @@ interface TaskDao {
 }
 
 @Dao
+interface ScheduledTaskDao {
+    @Query("SELECT * FROM scheduled_tasks ORDER BY nextRunAt ASC")
+    fun getAllSchedules(): Flow<List<ScheduledTask>>
+
+    @Query("SELECT * FROM scheduled_tasks WHERE enabled = 1 ORDER BY nextRunAt ASC")
+    suspend fun getEnabledSchedules(): List<ScheduledTask>
+
+    @Query("SELECT * FROM scheduled_tasks WHERE id = :id LIMIT 1")
+    suspend fun getById(id: String): ScheduledTask?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insert(schedule: ScheduledTask)
+
+    @Update
+    suspend fun update(schedule: ScheduledTask)
+
+    @Delete
+    suspend fun delete(schedule: ScheduledTask)
+}
+
+@Dao
 interface MemoryDao {
     @Query("SELECT * FROM memories WHERE projectId = :projectId OR projectId IS NULL ORDER BY timestamp DESC")
     fun getMemoriesForProject(projectId: String): Flow<List<MemoryEntry>>

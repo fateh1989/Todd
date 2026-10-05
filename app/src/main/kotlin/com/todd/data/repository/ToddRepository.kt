@@ -19,6 +19,24 @@ class ToddRepository(private val database: ToddDatabase) {
     suspend fun saveTask(task: Task) = database.taskDao().insertTask(task)
     suspend fun updateTask(task: Task) = database.taskDao().updateTask(task)
 
+    fun getAllSchedules(): Flow<List<ScheduledTask>> =
+        database.scheduledTaskDao().getAllSchedules()
+
+    suspend fun getEnabledSchedules(): List<ScheduledTask> =
+        database.scheduledTaskDao().getEnabledSchedules()
+
+    suspend fun getScheduledTask(id: String): ScheduledTask? =
+        database.scheduledTaskDao().getById(id)
+
+    suspend fun saveScheduledTask(schedule: ScheduledTask) =
+        database.scheduledTaskDao().insert(schedule)
+
+    suspend fun updateScheduledTask(schedule: ScheduledTask) =
+        database.scheduledTaskDao().update(schedule)
+
+    suspend fun deleteScheduledTask(schedule: ScheduledTask) =
+        database.scheduledTaskDao().delete(schedule)
+
     fun getMemoriesForProject(projectId: String): Flow<List<MemoryEntry>> =
         database.memoryDao().getMemoriesForProject(projectId)
     suspend fun saveMemory(memory: MemoryEntry) = database.memoryDao().insertMemory(memory)
