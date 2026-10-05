@@ -73,13 +73,19 @@ class ToddTextAgent(
         val prompt = buildPrompt(request)
         val directClient = directInteractionClient
         if (directClient != null && directClient.isAvailable()) {
-            return@withContext directClient.respond(
+            val directResult = directClient.respond(
                 request = request,
                 prompt = prompt,
                 tools = directToolDefinitions(),
                 executeTool = { call -> executeDirectTool(call) },
                 maxToolRounds = MAX_TOOL_ROUNDS
             )
+            if (directResult.isSuccess) {
+                return@withContext directResult
+            }
+            // The richer Interactions/tooling path is optional. If that endpoint,
+            // model, grounding, or tool schema is unavailable, normal Todd chat
+            // must still work through the already verified generateContent provider.
         }
 
         if (!FirebaseRuntimeConfig.current().configured) {
