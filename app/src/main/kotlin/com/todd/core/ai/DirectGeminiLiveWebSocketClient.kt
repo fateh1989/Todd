@@ -57,10 +57,14 @@ class DirectGeminiLiveWebSocketClient(
             "unless Todd has real tool evidence."
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private val httpClient = OkHttpClient.Builder()
-        .pingInterval(20, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(true)
-        .build()
+    // Keep the Live transport dormant until the owner actually starts a voice session.
+    // This avoids allocating the OkHttp connection pool during normal text-only use.
+    private val httpClient by lazy(LazyThreadSafetyMode.SYNCHRONIZED) {
+        OkHttpClient.Builder()
+            .pingInterval(20, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .build()
+    }
 
     @Volatile
     private var connected = false
