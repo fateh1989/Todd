@@ -69,6 +69,8 @@ class DirectGeminiLiveWebSocketClient(
     private var muted = false
 
     private var callbacks = DirectGeminiLiveCallbacks()
+    private var tools: List<DirectToolDefinition> = emptyList()
+    private var executeTool: (suspend (DirectToolCall) -> JSONObject)? = null
     private var webSocket: WebSocket? = null
     private var setupReady: CompletableDeferred<Unit>? = null
 
@@ -84,13 +86,17 @@ class DirectGeminiLiveWebSocketClient(
     fun isConnected(): Boolean = connected
 
     suspend fun start(
-        callbacks: DirectGeminiLiveCallbacks = DirectGeminiLiveCallbacks()
+        callbacks: DirectGeminiLiveCallbacks = DirectGeminiLiveCallbacks(),
+        tools: List<DirectToolDefinition> = emptyList(),
+        executeTool: (suspend (DirectToolCall) -> JSONObject)? = null
     ): Result<Unit> = runCatching {
         stop()
         val apiKey = apiKeyProvider()?.trim().orEmpty()
         require(apiKey.isNotBlank()) { "Gemini API key is not configured." }
 
         this.callbacks = callbacks
+        this.tools = tools
+        this.executeTool = executeTool
         muted = false
 
         val ready = CompletableDeferred<Unit>()
@@ -177,28 +183,52 @@ class DirectGeminiLiveWebSocketClient(
 
         webSocket?.close(1000, "Todd Live session ended")
         webSocket = null
+        tools = emptyList()
+        executeTool = null
     }
 
     private val socketListener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
-            val setup = JSONObject()
+            val setupBody = JSONObject()
+                .put("model", "models/$modelName")
                 .put(
-                    "setup",
-                    JSONObject()
-                        .put("model", "models/$modelName")
-                        .put("responseModalities", JSONArray().put("AUDIO"))
-                        .put("inputAudioTranscription", JSONObject())
-                        .put("outputAudioTranscription", JSONObject())
-                        .put(
-                            "systemInstruction",
-                            JSONObject().put(
-                                "parts",
-                                JSONArray().put(
-                                    JSONObject().put("text", systemInstruction)
-                                )
-                            )
-                        )
+                    "generationConfig",
+                    JSONObject().put(
+                        "responseModalities",
+                        JSONArray().put("AUDIO")
+                    )
                 )
+                .put("inputAudioTranscription", JSONObject())
+                .put("outputAudioTranscription", JSONObject())
+                .put(
+                    "systemInstruction",
+                    JSONObject().put(
+                        "parts",
+                        JSONArray().put(
+                            JSONObject().put("text", systemInstruction)
+                        )
+                    )
+                )
+
+            if (tools.isNotEmpty()) {
+                val declarations = JSONArray()
+                tools.forEach { tool ->
+                    declarations.put(
+                        JSONObject()
+                            .put("name", tool.name)
+                            .put("description", tool.description)
+                            .put("parameters", tool.parameters)
+                    )
+                }
+                setupBody.put(
+                    "tools",
+                    JSONArray().put(
+                        JSONObject().put("functionDeclarations", declarations)
+                    )
+                )
+            }
+
+            val setup = JSONObject().put("setup", setupBody)
 
             if (!webSocket.send(setup.toString())) {
                 setupReady?.completeExceptionally(
@@ -216,6 +246,64 @@ class DirectGeminiLiveWebSocketClient(
             if (root.has("setupComplete")) {
                 setupReady?.takeIf { !it.isCompleted }?.complete(Unit)
                 return
+            }
+
+            val toolCall = root.optJSONObject("toolCall")
+            val functionCalls = toolCall?.optJSONArray("functionCalls")
+            if (functionCalls != null && functionCalls.length() > 0) {
+                val executor = executeTool
+                if (executor == null) {
+                    callbacks.onError(
+                        IllegalStateException(
+                            "Gemini Live requested a Todd tool but no direct tool executor is connected."
+                        )
+                    )
+                } else {
+                    scope.launch {
+                        val functionResponses = JSONArray()
+                        for (i in 0 until functionCalls.length()) {
+                            val raw = functionCalls.optJSONObject(i) ?: continue
+                            val id = raw.optString("id")
+                            val name = raw.optString("name")
+                            if (id.isBlank() || name.isBlank()) continue
+
+                            val call = DirectToolCall(
+                                id = id,
+                                name = name,
+                                arguments = raw.optJSONObject("args") ?: JSONObject()
+                            )
+                            val result = runCatching { executor(call) }.getOrElse { error ->
+                                JSONObject()
+                                    .put("ok", false)
+                                    .put("error", error.message ?: error::class.java.simpleName)
+                            }
+
+                            functionResponses.put(
+                                JSONObject()
+                                    .put("id", id)
+                                    .put("name", name)
+                                    .put(
+                                        "response",
+                                        JSONObject().put("result", result)
+                                    )
+                            )
+                        }
+
+                        if (functionResponses.length() > 0) {
+                            webSocket.send(
+                                JSONObject()
+                                    .put(
+                                        "toolResponse",
+                                        JSONObject().put(
+                                            "functionResponses",
+                                            functionResponses
+                                        )
+                                    )
+                                    .toString()
+                            )
+                        }
+                    }
+                }
             }
 
             val serverContent = root.optJSONObject("serverContent")

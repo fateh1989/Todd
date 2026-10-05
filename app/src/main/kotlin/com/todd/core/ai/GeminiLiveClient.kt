@@ -54,6 +54,8 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import java.io.File
+import org.json.JSONArray
+import org.json.JSONObject
 
 enum class GeminiLiveState {
     DISCONNECTED,
@@ -83,7 +85,7 @@ class GeminiLiveClient(
     private val autonomousTaskCoordinator: AutonomousTaskCoordinator? = null,
     private val stateMachine: ToddStateMachine? = null,
     private val directLiveClient: DirectGeminiLiveWebSocketClient? = null,
-    val liveModelName: String = "gemini-3.1-flash-live-preview",
+    val liveModelName: String = "gemini-3.8-live",
     private val sessionStarter: (suspend () -> Result<Unit>)? = null,
     private val textResponder: (suspend (String) -> Result<String>)? = null
 ) {
@@ -132,7 +134,35 @@ class GeminiLiveClient(
             val injectedStarter = sessionStarter
             if (injectedStarter != null) {
                 injectedStarter().getOrThrow()
-            } else if (firebaseConfigured) {
+            } else if (directConfigured) {
+                val direct = requireNotNull(directLiveClient)
+                direct.start(
+                    callbacks = DirectGeminiLiveCallbacks(
+                        onInputTranscript = { text ->
+                            addTranscript("USER", text)
+                            _state.value = GeminiLiveState.THINKING
+                        },
+                        onOutputTranscript = { text ->
+                            addTranscript("TODD", text)
+                            _state.value = GeminiLiveState.SPEAKING
+                        },
+                        onAudioOutput = {
+                            _state.value = GeminiLiveState.SPEAKING
+                        },
+                        onTurnComplete = {
+                            _state.value = GeminiLiveState.LISTENING
+                        },
+                        onInterrupted = {
+                            _state.value = GeminiLiveState.LISTENING
+                        },
+                        onError = {
+                            _state.value = GeminiLiveState.ERROR
+                        }
+                    ),
+                    tools = directLiveToolDefinitions(),
+                    executeTool = ::executeDirectLiveTool
+                ).getOrThrow()
+            } else {
                 val generationConfig = liveGenerationConfig {
                     responseModality = ResponseModality.AUDIO
                     inputAudioTranscription = AudioTranscriptionConfig()
@@ -155,32 +185,6 @@ class GeminiLiveClient(
                     transcriptHandler = ::handleTranscription,
                     enableInterruptions = true
                 )
-            } else {
-                val direct = requireNotNull(directLiveClient)
-                direct.start(
-                    DirectGeminiLiveCallbacks(
-                        onInputTranscript = { text ->
-                            addTranscript("USER", text)
-                            _state.value = GeminiLiveState.THINKING
-                        },
-                        onOutputTranscript = { text ->
-                            addTranscript("TODD", text)
-                            _state.value = GeminiLiveState.SPEAKING
-                        },
-                        onAudioOutput = {
-                            _state.value = GeminiLiveState.SPEAKING
-                        },
-                        onTurnComplete = {
-                            _state.value = GeminiLiveState.LISTENING
-                        },
-                        onInterrupted = {
-                            _state.value = GeminiLiveState.LISTENING
-                        },
-                        onError = {
-                            _state.value = GeminiLiveState.ERROR
-                        }
-                    )
-                ).getOrThrow()
             }
 
             _isMuted.value = false
@@ -193,6 +197,499 @@ class GeminiLiveClient(
             abandonAudioFocus()
             Result.failure(e)
         }
+    }
+
+    private fun directLiveToolDefinitions(): List<DirectToolDefinition> = listOf(
+        directLiveTool(
+            name = "getCurrentDeviceContext",
+            description = "Read Todd's current fused Android context."
+        ),
+        directLiveTool(
+            name = "startAutonomousCoding",
+            description = "Start Todd's persistent autonomous coding loop.",
+            params = mapOf(
+                "objective" to "Exact coding objective spoken by the owner."
+            ),
+            required = listOf("objective")
+        ),
+        directLiveTool(
+            name = "checkTaskStatus",
+            description = "Read one durable Todd task state and evidence.",
+            params = mapOf("taskId" to "Todd task ID."),
+            required = listOf("taskId")
+        ),
+        directLiveTool(
+            name = "checkLatestTask",
+            description = "Read the newest durable Todd task for the active project."
+        ),
+        directLiveTool(
+            name = "checkRepositoryStatus",
+            description = "Read the current branch and latest commit for a GitHub repository.",
+            params = mapOf(
+                "repository" to "Repository in owner/name format.",
+                "branch" to "Branch name, normally main."
+            )
+        ),
+        directLiveTool(
+            name = "checkLatestWorkflow",
+            description = "Read the latest GitHub Actions workflow status and artifact.",
+            params = mapOf(
+                "repository" to "Repository in owner/name format.",
+                "branch" to "Branch name, normally main."
+            )
+        ),
+        directLiveTool(
+            name = "listRepositoryFiles",
+            description = "List repository file paths before deciding what to inspect.",
+            params = mapOf(
+                "repository" to "Repository in owner/name format.",
+                "branch" to "Branch name, normally main."
+            )
+        ),
+        directLiveTool(
+            name = "readRepositoryFile",
+            description = "Read the current text content of one repository file.",
+            params = mapOf(
+                "repository" to "Repository in owner/name format.",
+                "path" to "Repository-relative file path.",
+                "ref" to "Branch or commit SHA."
+            ),
+            required = listOf("path")
+        ),
+        directLiveTool(
+            name = "startRemoteVerification",
+            description = "Start a persistent GitHub Actions verification job.",
+            params = mapOf(
+                "repository" to "Repository in owner/name format.",
+                "branch" to "Branch name.",
+                "objective" to "What the remote job should verify.",
+                "completionCriteria" to "Concrete completion criteria."
+            ),
+            required = listOf("objective")
+        ),
+        directLiveTool(
+            name = "checkRemoteJob",
+            description = "Reconnect to a Todd remote job and read its state.",
+            params = mapOf("jobId" to "Todd remote job ID."),
+            required = listOf("jobId")
+        ),
+        directLiveTool(
+            name = "cancelRemoteJob",
+            description = "Cancel a Todd remote job when the owner explicitly asks.",
+            params = mapOf("jobId" to "Todd remote job ID."),
+            required = listOf("jobId")
+        )
+    )
+
+    private fun directLiveTool(
+        name: String,
+        description: String,
+        params: Map<String, String> = emptyMap(),
+        required: List<String> = emptyList()
+    ): DirectToolDefinition {
+        val properties = JSONObject()
+        params.forEach { (paramName, paramDescription) ->
+            properties.put(
+                paramName,
+                JSONObject()
+                    .put("type", "string")
+                    .put("description", paramDescription)
+            )
+        }
+
+        val parameters = JSONObject()
+            .put("type", "object")
+            .put("properties", properties)
+
+        if (required.isNotEmpty()) {
+            parameters.put("required", JSONArray(required))
+        }
+
+        return DirectToolDefinition(
+            name = name,
+            description = description,
+            parameters = parameters
+        )
+    }
+
+    private suspend fun executeDirectLiveTool(call: DirectToolCall): JSONObject {
+        fun arg(name: String): String =
+            call.arguments.optString(name, "").trim()
+
+        val repo = arg("repository").ifBlank { "fateh1989/Todd" }
+        val branch = arg("branch").ifBlank { "main" }
+        val projectId = stateMachine?.state?.value?.activeProjectId ?: "todd-main"
+
+        val category = when (call.name) {
+            "getCurrentDeviceContext" -> ActionCategory.SCREEN_CONTEXT_READ
+            "startAutonomousCoding", "startRemoteVerification", "cancelRemoteJob" ->
+                ActionCategory.RUN_SHELL_COMMAND
+            else -> ActionCategory.GIT_READ
+        }
+
+        val evaluation = rulesEngine.evaluate(
+            ActionRequest(
+                category = category,
+                projectId = projectId,
+                target = repo,
+                dataSummary = "Direct Gemini Live tool call: ${call.name}",
+                isPreApprovedInInstruction = true
+            )
+        )
+
+        if (!evaluation.isAllowed) {
+            return JSONObject()
+                .put("ok", false)
+                .put(
+                    "error",
+                    evaluation.promptMessage ?: "Tool call was not approved."
+                )
+        }
+
+        val response = when (call.name) {
+            "getCurrentDeviceContext" -> buildJsonObject {
+                put("ok", true)
+                put("context", DeviceContextProvider.currentTextContext())
+                val visual = ScreenCaptureStore.state.value
+                put("visualCaptureRunning", visual.isRunning)
+                put("visualWidth", visual.width)
+                put("visualHeight", visual.height)
+                put("visualCapturedAt", visual.capturedAt)
+            }
+
+            "startAutonomousCoding" -> {
+                val objective = arg("objective")
+                val coordinator = autonomousTaskCoordinator
+                if (coordinator == null) {
+                    buildJsonObject {
+                        put("ok", false)
+                        put("error", "Todd autonomous coding is not connected.")
+                    }
+                } else if (objective.isBlank()) {
+                    buildJsonObject {
+                        put("ok", false)
+                        put("error", "Coding objective is required.")
+                    }
+                } else {
+                    val taskId = coordinator.start(
+                        projectId = projectId,
+                        title = objective.take(120),
+                        goal = objective,
+                        maxIterations = 4
+                    )
+                    buildJsonObject {
+                        put("ok", true)
+                        put("taskId", taskId)
+                        put("projectId", projectId)
+                        put("status", "STARTED")
+                    }
+                }
+            }
+
+            "checkTaskStatus" -> {
+                val taskId = arg("taskId")
+                val repoStore = repository
+                when {
+                    repoStore == null -> buildJsonObject {
+                        put("ok", false)
+                        put("error", "Todd task storage is not connected.")
+                    }
+                    taskId.isBlank() -> buildJsonObject {
+                        put("ok", false)
+                        put("error", "taskId is required.")
+                    }
+                    else -> {
+                        val task = repoStore.getTaskById(taskId)
+                        if (task == null) {
+                            buildJsonObject {
+                                put("ok", false)
+                                put("error", "Todd task was not found.")
+                            }
+                        } else {
+                            taskJson(task)
+                        }
+                    }
+                }
+            }
+
+            "checkLatestTask" -> {
+                val task = repository?.getLatestTaskForProject(projectId)
+                if (task == null) {
+                    buildJsonObject {
+                        put("ok", true)
+                        put("found", false)
+                        put("projectId", projectId)
+                    }
+                } else {
+                    taskJson(task)
+                }
+            }
+
+            "checkRepositoryStatus" -> {
+                val tool = githubTool
+                if (tool == null) {
+                    buildJsonObject {
+                        put("ok", false)
+                        put("error", "GitHub tool is not connected.")
+                    }
+                } else {
+                    tool.getRepositoryInfo(repo, branch).fold(
+                        onSuccess = { info ->
+                            buildJsonObject {
+                                put("ok", true)
+                                put("repository", info.fullName)
+                                put("branch", info.activeBranch)
+                                put("defaultBranch", info.defaultBranch)
+                                put("latestCommit", info.latestCommitSha)
+                            }
+                        },
+                        onFailure = { error ->
+                            buildJsonObject {
+                                put("ok", false)
+                                put("error", error.message ?: "GitHub read failed.")
+                            }
+                        }
+                    )
+                }
+            }
+
+            "checkLatestWorkflow" -> {
+                val tool = githubTool
+                if (tool == null) {
+                    buildJsonObject {
+                        put("ok", false)
+                        put("error", "GitHub tool is not connected.")
+                    }
+                } else {
+                    tool.getLatestWorkflowRun(repo, branch).fold(
+                        onSuccess = { run ->
+                            buildJsonObject {
+                                put("ok", true)
+                                put("found", run != null)
+                                if (run != null) {
+                                    put("runId", run.runId)
+                                    put("workflow", run.workflowName)
+                                    put("headSha", run.headSha)
+                                    put("status", run.status)
+                                    put("conclusion", run.conclusion ?: "")
+                                    put("artifact", run.artifactName ?: "")
+                                }
+                            }
+                        },
+                        onFailure = { error ->
+                            buildJsonObject {
+                                put("ok", false)
+                                put("error", error.message ?: "Workflow read failed.")
+                            }
+                        }
+                    )
+                }
+            }
+
+            "listRepositoryFiles" -> {
+                val tool = githubTool
+                if (tool == null) {
+                    buildJsonObject {
+                        put("ok", false)
+                        put("error", "GitHub tool is not connected.")
+                    }
+                } else {
+                    tool.listRepositoryFiles(repo, branch).fold(
+                        onSuccess = { files ->
+                            buildJsonObject {
+                                put("ok", true)
+                                put("count", files.size)
+                                put("files", files.joinToString("\n"))
+                            }
+                        },
+                        onFailure = { error ->
+                            buildJsonObject {
+                                put("ok", false)
+                                put("error", error.message ?: "Repository tree read failed.")
+                            }
+                        }
+                    )
+                }
+            }
+
+            "readRepositoryFile" -> {
+                val tool = githubTool
+                val path = arg("path")
+                val ref = arg("ref").ifBlank { branch }
+                when {
+                    tool == null -> buildJsonObject {
+                        put("ok", false)
+                        put("error", "GitHub tool is not connected.")
+                    }
+                    path.isBlank() -> buildJsonObject {
+                        put("ok", false)
+                        put("error", "File path is required.")
+                    }
+                    else -> tool.readFile(repo, path, ref).fold(
+                        onSuccess = { file ->
+                            buildJsonObject {
+                                put("ok", true)
+                                put("path", file.path)
+                                put("sha", file.sha)
+                                put("content", file.content)
+                            }
+                        },
+                        onFailure = { error ->
+                            buildJsonObject {
+                                put("ok", false)
+                                put("error", error.message ?: "File read failed.")
+                            }
+                        }
+                    )
+                }
+            }
+
+            "startRemoteVerification" -> {
+                val executor = remoteExecutor
+                val tool = githubTool
+                val objective = arg("objective")
+                val criteria = arg("completionCriteria").ifBlank {
+                    "GitHub Actions verification completes successfully with evidence."
+                }
+
+                when {
+                    executor == null || tool == null -> buildJsonObject {
+                        put("ok", false)
+                        put("error", "Todd remote verification is not connected.")
+                    }
+                    objective.isBlank() -> buildJsonObject {
+                        put("ok", false)
+                        put("error", "Remote objective is required.")
+                    }
+                    else -> {
+                        val infoResult = tool.getRepositoryInfo(repo, branch)
+                        val info = infoResult.getOrNull()
+                        if (info == null) {
+                            buildJsonObject {
+                                put("ok", false)
+                                put(
+                                    "error",
+                                    infoResult.exceptionOrNull()?.message
+                                        ?: "Could not resolve repository state."
+                                )
+                            }
+                        } else {
+                            val jobId = "voice-remote-${System.currentTimeMillis()}"
+                            repository?.saveTask(
+                                Task(
+                                    id = jobId,
+                                    projectId = projectId,
+                                    title = objective.take(120),
+                                    goal = objective,
+                                    userInstructions = objective,
+                                    status = TaskStatus.PLANNED,
+                                    currentStep = "Preparing remote verification",
+                                    completionCriteria = criteria
+                                )
+                            )
+                            executor.startJob(
+                                RemoteJobRequest(
+                                    jobId = jobId,
+                                    projectId = projectId,
+                                    repository = repo,
+                                    branch = branch,
+                                    startCommit = info.latestCommitSha,
+                                    objective = objective,
+                                    completionCriteria = criteria,
+                                    mode = RemoteExecutionMode.VERIFY_ANDROID
+                                )
+                            ).fold(
+                                onSuccess = {
+                                    buildJsonObject {
+                                        put("ok", true)
+                                        put("jobId", jobId)
+                                        put("startCommit", info.latestCommitSha)
+                                    }
+                                },
+                                onFailure = { error ->
+                                    buildJsonObject {
+                                        put("ok", false)
+                                        put("error", error.message ?: "Remote job failed to start.")
+                                    }
+                                }
+                            )
+                        }
+                    }
+                }
+            }
+
+            "checkRemoteJob" -> {
+                val executor = remoteExecutor
+                val jobId = arg("jobId")
+                when {
+                    executor == null -> buildJsonObject {
+                        put("ok", false)
+                        put("error", "Remote executor is not connected.")
+                    }
+                    jobId.isBlank() -> buildJsonObject {
+                        put("ok", false)
+                        put("error", "jobId is required.")
+                    }
+                    else -> executor.reconnect(jobId).fold(
+                        onSuccess = { state ->
+                            buildJsonObject {
+                                put("ok", true)
+                                put("jobId", state.jobId)
+                                put("status", state.status.name)
+                                put("step", state.currentStepDescription)
+                                put("runId", state.providerRunId ?: 0L)
+                                put("runUrl", state.providerRunUrl ?: "")
+                                put("artifacts", state.artifactNames.joinToString("\n"))
+                                put("failure", state.failureMessage ?: "")
+                            }
+                        },
+                        onFailure = { error ->
+                            buildJsonObject {
+                                put("ok", false)
+                                put("error", error.message ?: "Remote job refresh failed.")
+                            }
+                        }
+                    )
+                }
+            }
+
+            "cancelRemoteJob" -> {
+                val executor = remoteExecutor
+                val jobId = arg("jobId")
+                when {
+                    executor == null -> buildJsonObject {
+                        put("ok", false)
+                        put("error", "Remote executor is not connected.")
+                    }
+                    jobId.isBlank() -> buildJsonObject {
+                        put("ok", false)
+                        put("error", "jobId is required.")
+                    }
+                    else -> executor.requestCancel(jobId).fold(
+                        onSuccess = { accepted ->
+                            buildJsonObject {
+                                put("ok", accepted)
+                                put("jobId", jobId)
+                                put("cancelRequested", accepted)
+                            }
+                        },
+                        onFailure = { error ->
+                            buildJsonObject {
+                                put("ok", false)
+                                put("error", error.message ?: "Remote cancellation failed.")
+                            }
+                        }
+                    )
+                }
+            }
+
+            else -> buildJsonObject {
+                put("ok", false)
+                put("error", "Unknown direct Gemini Live tool: ${call.name}")
+            }
+        }
+
+        return JSONObject(response.toString())
     }
 
     private fun buildLiveTools(): List<Tool> {
