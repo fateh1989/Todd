@@ -870,11 +870,7 @@ fun HomeDashboard(
     }
 
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            // Keep the composer and Send button above the software keyboard on
-            // edge-to-edge Android devices instead of letting the IME cover them.
-            .imePadding()
+        modifier = Modifier.fillMaxSize()
     ) {
         VoiceConversationCard(
             state = voiceState,
