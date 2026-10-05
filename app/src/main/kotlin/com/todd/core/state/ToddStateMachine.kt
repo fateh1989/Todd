@@ -169,4 +169,18 @@ class ToddStateMachine(
     fun setAIMode(mode: AIProviderMode) {
         _state.update { it.copy(aiMode = mode) }
     }
+
+    fun setActiveProject(projectId: String?) {
+        _state.update {
+            it.copy(
+                activeProjectId = projectId,
+                activeTaskId = if (it.activeProjectId == projectId) it.activeTaskId else null,
+                nextPlannedAction = if (projectId == null) {
+                    "No active project selected."
+                } else {
+                    "Active project changed to $projectId."
+                }
+            )
+        }
+    }
 }

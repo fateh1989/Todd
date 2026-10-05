@@ -456,7 +456,29 @@ fun ToddMainScreen(
                         )
                     }
                 )
-                1 -> ProjectsView(projects)
+                1 -> ProjectsView(
+                    projects = projects,
+                    activeProjectId = state.activeProjectId ?: "todd-main",
+                    onSelectProject = { project ->
+                        stateMachine.setActiveProject(project.id)
+                        app.activeProjectStore.set(project.id)
+                    },
+                    onCreateProject = { name, repositoryName, branch ->
+                        scope.launch {
+                            val project = Project(
+                                id = "project-${System.currentTimeMillis()}",
+                                name = name.trim(),
+                                description = "",
+                                repository = repositoryName.trim().ifBlank { null },
+                                branch = branch.trim().ifBlank { "main" },
+                                currentGoal = ""
+                            )
+                            app.repository.saveProject(project)
+                            stateMachine.setActiveProject(project.id)
+                            app.activeProjectStore.set(project.id)
+                        }
+                    }
+                )
                 2 -> ActivityView(
                     tasks = tasks,
                     onRefreshRemote = { task ->
@@ -868,21 +890,122 @@ fun VoiceConversationCard(
 }
 
 @Composable
-fun ProjectsView(projects: List<Project>) {
-    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+fun ProjectsView(
+    projects: List<Project>,
+    activeProjectId: String,
+    onSelectProject: (Project) -> Unit,
+    onCreateProject: (String, String, String) -> Unit
+) {
+    var showCreate by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("المشاريع", color = Color.White, fontWeight = FontWeight.Bold)
+            Button(onClick = { showCreate = true }) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(5.dp))
+                Text("مشروع جديد")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxSize()
+        ) {
         items(projects) { project ->
+            val active = project.id == activeProjectId
             Card(
-                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
-                modifier = Modifier.fillMaxWidth()
+                colors = CardDefaults.cardColors(
+                    containerColor = if (active) Color(0xFF312E81) else Color(0xFF1E293B)
+                ),
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { onSelectProject(project) }
             ) {
                 Column(modifier = Modifier.padding(12.dp)) {
-                    Text(project.name, fontWeight = FontWeight.Bold, color = Color.White)
-                    Text("المستودع: ${project.repository ?: "محلي"}", fontSize = 12.sp, color = Color(0xFF94A3B8))
-                    Text("الفرع: ${project.branch}", fontSize = 12.sp, color = Color(0xFF94A3B8))
-                    Text("آخر التزام موثق: ${project.lastVerifiedCommit ?: "لا يوجد بعد"}", fontSize = 11.sp, color = Color(0xFF6366F1))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(project.name, fontWeight = FontWeight.Bold, color = Color.White)
+                        if (active) {
+                            Badge(containerColor = Color(0xFF10B981)) {
+                                Text("نشط", fontSize = 10.sp)
+                            }
+                        }
+                    }
+                    Text(
+                        "المستودع: ${project.repository ?: "محلي"}",
+                        fontSize = 12.sp,
+                        color = Color(0xFF94A3B8)
+                    )
+                    Text(
+                        "الفرع: ${project.branch}",
+                        fontSize = 12.sp,
+                        color = Color(0xFF94A3B8)
+                    )
+                    Text(
+                        "آخر التزام موثق: ${project.lastVerifiedCommit ?: "لا يوجد بعد"}",
+                        fontSize = 11.sp,
+                        color = Color(0xFF818CF8)
+                    )
                 }
             }
         }
+    }
+
+    if (showCreate) {
+        var projectName by remember { mutableStateOf("") }
+        var repositoryName by remember { mutableStateOf("") }
+        var branchName by remember { mutableStateOf("main") }
+
+        AlertDialog(
+            onDismissRequest = { showCreate = false },
+            title = { Text("إنشاء مشروع Todd") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = projectName,
+                        onValueChange = { projectName = it },
+                        label = { Text("اسم المشروع") },
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = repositoryName,
+                        onValueChange = { repositoryName = it },
+                        label = { Text("GitHub owner/repo — اختياري") },
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = branchName,
+                        onValueChange = { branchName = it },
+                        label = { Text("الفرع") },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onCreateProject(projectName, repositoryName, branchName)
+                        showCreate = false
+                    },
+                    enabled = projectName.isNotBlank()
+                ) {
+                    Text("إنشاء")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showCreate = false }) {
+                    Text("إلغاء")
+                }
+            }
+        )
     }
 }
 

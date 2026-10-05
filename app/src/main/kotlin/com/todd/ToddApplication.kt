@@ -28,6 +28,7 @@ import com.todd.core.agent.ToddTextAgent
 import com.todd.core.diagnostics.ToddDiagnostics
 import com.todd.core.model.Project
 import com.todd.core.model.TaskStatus
+import com.todd.core.project.ActiveProjectStore
 import com.todd.service.recovery.AutonomousRecoveryScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -54,6 +55,9 @@ class ToddApplication : Application() {
         private set
 
     lateinit var stateMachine: ToddStateMachine
+        private set
+
+    lateinit var activeProjectStore: ActiveProjectStore
         private set
 
     lateinit var githubTool: GitHubTool
@@ -94,6 +98,8 @@ class ToddApplication : Application() {
         repository = ToddRepository(database)
         memoryLearningEngine = MemoryLearningEngine(repository)
         stateMachine = ToddStateMachine(repository)
+        activeProjectStore = ActiveProjectStore(this)
+        activeProjectStore.get()?.let(stateMachine::setActiveProject)
         githubCredentialStore = GitHubCredentialStore(this)
         firebaseRuntimeCredentialStore = FirebaseRuntimeCredentialStore(this)
         runCatching {
