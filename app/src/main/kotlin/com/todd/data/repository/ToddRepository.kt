@@ -40,6 +40,7 @@ class ToddRepository(private val database: ToddDatabase) {
     fun getMemoriesForProject(projectId: String): Flow<List<MemoryEntry>> =
         database.memoryDao().getMemoriesForProject(projectId)
     suspend fun saveMemory(memory: MemoryEntry) = database.memoryDao().insertMemory(memory)
+    suspend fun deleteMemory(memory: MemoryEntry) = database.memoryDao().deleteMemory(memory)
 
     fun getFailures(projectId: String): Flow<List<FailureRecord>> =
         database.failureDao().getFailuresForProject(projectId)

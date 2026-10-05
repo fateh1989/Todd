@@ -15,6 +15,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -202,6 +204,14 @@ fun ToddMainScreen(
         memories
             .filter { it.layer == MemoryLayer.EPISODIC && it.key.startsWith("chat:") }
             .sortedBy { it.timestamp }
+    }
+    val learnedMemories = remember(memories) {
+        memories
+            .filter {
+                it.key.startsWith("learned:") &&
+                    (it.layer == MemoryLayer.PREFERENCES || it.layer == MemoryLayer.PROJECT)
+            }
+            .sortedByDescending { it.timestamp }
     }
     var isChatBusy by remember { mutableStateOf(false) }
     var localAIStatus by remember { mutableStateOf("لم يتم فحص النموذج المحلي بعد") }
@@ -593,6 +603,7 @@ fun ToddMainScreen(
                     accessibilityEnabled = accessibilityEnabled,
                     notificationAccessEnabled = notificationAccessEnabled,
                     githubTokenConfigured = app.githubCredentialStore.hasToken(),
+                    learnedMemories = learnedMemories,
                     geminiApiKeyConfigured = geminiApiKeyConfigured,
                     selectedGeminiModel = selectedGeminiModel,
                     firebaseConfigured = firebaseRuntimeStatus.configured,
@@ -707,6 +718,9 @@ fun ToddMainScreen(
                         app.autonomousTaskCoordinator.resumePending()
                     },
                     onClearGitHubToken = { app.githubCredentialStore.clearToken() },
+                    onDeleteLearnedMemory = { memory ->
+                        scope.launch { app.repository.deleteMemory(memory) }
+                    },
                     diagnosticsReport = diagnosticsReport,
                     diagnosticsBusy = diagnosticsBusy,
                     onRunDiagnostics = {
@@ -1352,6 +1366,7 @@ fun SettingsView(
     accessibilityEnabled: Boolean,
     notificationAccessEnabled: Boolean,
     githubTokenConfigured: Boolean,
+    learnedMemories: List<MemoryEntry>,
     geminiApiKeyConfigured: Boolean,
     selectedGeminiModel: GeminiCloudModel,
     firebaseConfigured: Boolean,
@@ -1371,6 +1386,7 @@ fun SettingsView(
     onClearFirebaseConfig: () -> Unit,
     onSaveGitHubToken: (String) -> Unit,
     onClearGitHubToken: () -> Unit,
+    onDeleteLearnedMemory: (MemoryEntry) -> Unit,
     diagnosticsReport: ToddDiagnosticReport?,
     diagnosticsBusy: Boolean,
     onRunDiagnostics: () -> Unit,
@@ -1383,6 +1399,7 @@ fun SettingsView(
     var githubToken by remember { mutableStateOf("") }
     var geminiApiKey by remember { mutableStateOf("") }
     var firebaseConfigJson by remember { mutableStateOf("") }
+    var pendingMemoryDelete by remember { mutableStateOf<MemoryEntry?>(null) }
     val context = LocalContext.current
     val firebaseFileLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -1396,7 +1413,11 @@ fun SettingsView(
         }
     }
 
-    Column {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+    ) {
         Text("وضع توجيه الذكاء الاصطناعي (AI Routing)", fontWeight = FontWeight.Bold, color = Color.White)
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -1595,6 +1616,56 @@ fun SettingsView(
         }
 
         Spacer(modifier = Modifier.height(20.dp))
+        Text("ذاكرة Todd المتعلّمة", fontWeight = FontWeight.Bold, color = Color.White)
+        Text(
+            if (learnedMemories.isEmpty()) {
+                "لا توجد تعليمات دائمة تعلّمها Todd منك بعد."
+            } else {
+                "هذه تعليمات وتفضيلات حفظها Todd من كلامك. يمكنك مراجعتها أو حذف ما لم تعد تريده."
+            },
+            fontSize = 12.sp,
+            color = Color(0xFF94A3B8)
+        )
+
+        learnedMemories.take(12).forEach { memory ->
+            Spacer(modifier = Modifier.height(7.dp))
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            if (memory.layer == MemoryLayer.PROJECT) "ذاكرة المشروع" else "تفضيل عام",
+                            fontSize = 10.sp,
+                            color = Color(0xFF818CF8)
+                        )
+                        Text(memory.value, fontSize = 12.sp, color = Color.White)
+                    }
+                    IconButton(onClick = { pendingMemoryDelete = memory }) {
+                        Icon(
+                            Icons.Default.DeleteOutline,
+                            contentDescription = "حذف الذاكرة",
+                            tint = Color(0xFFF87171)
+                        )
+                    }
+                }
+            }
+        }
+
+        if (learnedMemories.size > 12) {
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                "تظهر أحدث 12 ذاكرة من أصل ${learnedMemories.size}.",
+                fontSize = 11.sp,
+                color = Color(0xFF94A3B8)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
         Text("فهم الشاشة", fontWeight = FontWeight.Bold, color = Color.White)
         Spacer(modifier = Modifier.height(8.dp))
         Text(
@@ -1748,5 +1819,28 @@ fun SettingsView(
                 }
             }
         }
+    }
+
+    pendingMemoryDelete?.let { memory ->
+        AlertDialog(
+            onDismissRequest = { pendingMemoryDelete = null },
+            title = { Text("حذف ذاكرة Todd؟") },
+            text = { Text(memory.value) },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onDeleteLearnedMemory(memory)
+                        pendingMemoryDelete = null
+                    }
+                ) {
+                    Text("حذف")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { pendingMemoryDelete = null }) {
+                    Text("إلغاء")
+                }
+            }
+        )
     }
 }
