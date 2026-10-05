@@ -278,7 +278,8 @@ class ToddApplication : Application() {
             repository = repository,
             aiRouter = aiRouter,
             githubTool = githubTool,
-            githubCredentialStore = githubCredentialStore
+            githubCredentialStore = githubCredentialStore,
+            liveClient = liveClient
         )
 
         appScope.launch {

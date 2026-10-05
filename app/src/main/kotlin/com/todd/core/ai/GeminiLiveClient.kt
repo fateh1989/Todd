@@ -105,6 +105,22 @@ class GeminiLiveClient(
     private var liveSession: LiveSession? = null
     private var screenSyncJob: Job? = null
 
+    fun isRuntimeConfigured(): Boolean =
+        sessionStarter != null ||
+            directLiveClient?.isAvailable() == true ||
+            FirebaseRuntimeConfig.current().configured
+
+    fun runtimeDescription(): String = when {
+        directLiveClient?.isAvailable() == true ->
+            "Gemini Live المباشر جاهز باستخدام مفتاح Gemini API."
+        FirebaseRuntimeConfig.current().configured ->
+            "Gemini Live جاهز عبر Firebase."
+        sessionStarter != null ->
+            "مسار اختبار Gemini Live جاهز."
+        else ->
+            "لا يوجد مسار Gemini Live مهيأ بعد."
+    }
+
     suspend fun startSession(mode: AIProviderMode): Result<Boolean> = withContext(Dispatchers.IO) {
         if (mode == AIProviderMode.LOCAL_ONLY) {
             _state.value = GeminiLiveState.ERROR

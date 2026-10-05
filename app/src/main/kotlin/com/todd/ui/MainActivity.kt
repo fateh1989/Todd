@@ -1918,6 +1918,18 @@ fun SettingsView(
                 fontSize = 12.sp,
                 color = if (report.failCount == 0) Color(0xFF10B981) else Color(0xFFF87171)
             )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                if (report.isFullToddReady) {
+                    "Todd جاهز كنسخة كاملة على هذا الجهاز."
+                } else {
+                    "متبقي قبل الجاهزية الكاملة: " +
+                        report.blockingChecks.joinToString("، ") { it.title }
+                },
+                fontSize = 12.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = if (report.isFullToddReady) Color(0xFF10B981) else Color(0xFFF59E0B)
+            )
             Spacer(modifier = Modifier.height(8.dp))
 
             report.checks.forEach { check ->

@@ -11,6 +11,7 @@ import androidx.core.content.ContextCompat
 import com.todd.core.ai.AIRouter
 import com.todd.core.ai.AIRequest
 import com.todd.core.ai.FirebaseRuntimeConfig
+import com.todd.core.ai.GeminiLiveClient
 import com.todd.core.security.SigningIdentity
 import com.todd.core.tools.GitHubCredentialStore
 import com.todd.core.tools.GitHubTool
@@ -38,6 +39,28 @@ data class ToddDiagnosticReport(
     val passCount: Int get() = checks.count { it.status == DiagnosticStatus.PASS }
     val warnCount: Int get() = checks.count { it.status == DiagnosticStatus.WARN }
     val failCount: Int get() = checks.count { it.status == DiagnosticStatus.FAIL }
+
+    val blockingChecks: List<DiagnosticCheck>
+        get() = checks.filter {
+            it.id in REQUIRED_FOR_FULL_TODD && it.status != DiagnosticStatus.PASS
+        }
+
+    val isFullToddReady: Boolean get() = blockingChecks.isEmpty()
+
+    companion object {
+        private val REQUIRED_FOR_FULL_TODD = setOf(
+            "stable-signing",
+            "memory",
+            "cloud",
+            "voice-runtime",
+            "github",
+            "accessibility",
+            "overlay",
+            "microphone",
+            "notifications",
+            "keyboard"
+        )
+    }
 }
 
 class ToddDiagnostics(
@@ -45,7 +68,8 @@ class ToddDiagnostics(
     private val repository: ToddRepository,
     private val aiRouter: AIRouter,
     private val githubTool: GitHubTool,
-    private val githubCredentialStore: GitHubCredentialStore
+    private val githubCredentialStore: GitHubCredentialStore,
+    private val liveClient: GeminiLiveClient
 ) {
 
     suspend fun run(): ToddDiagnosticReport {
@@ -76,16 +100,12 @@ class ToddDiagnostics(
             }
         )
 
-        val firebase = FirebaseRuntimeConfig.current()
+        val liveReady = liveClient.isRuntimeConfigured()
         checks += DiagnosticCheck(
-            id = "firebase",
-            title = "Firebase للصوت المباشر",
-            status = if (firebase.configured) DiagnosticStatus.PASS else DiagnosticStatus.WARN,
-            detail = if (firebase.configured) {
-                "Firebase مهيأ للمشروع ${firebase.projectId ?: "غير معروف"}."
-            } else {
-                firebase.reason ?: "Firebase غير مهيأ؛ هذا لا يمنع محادثة Todd النصية المباشرة."
-            }
+            id = "voice-runtime",
+            title = "Gemini Live الصوتي",
+            status = if (liveReady) DiagnosticStatus.PASS else DiagnosticStatus.WARN,
+            detail = liveClient.runtimeDescription()
         )
 
         val cloudAvailable = runCatching { aiRouter.cloudProvider.isAvailable() }.getOrDefault(false)
