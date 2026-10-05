@@ -38,6 +38,7 @@ import com.todd.core.ai.GeminiLiveState
 import com.todd.core.ai.LiveTranscriptItem
 import com.todd.core.ai.FirebaseRuntimeConfig
 import com.todd.core.ai.LocalOnDeviceAIProvider
+import com.todd.core.ai.GeminiCloudModel
 import com.todd.core.remote.RemoteExecutionMode
 import com.todd.core.remote.RemoteJobRequest
 import com.todd.core.agent.AutonomousCodingRequest
@@ -184,6 +185,7 @@ fun ToddMainScreen(
     var diagnosticsReport by remember { mutableStateOf<ToddDiagnosticReport?>(null) }
     var firebaseRuntimeStatus by remember { mutableStateOf(FirebaseRuntimeConfig.current()) }
     var geminiApiKeyConfigured by remember { mutableStateOf(app.geminiApiKeyStore.hasKey()) }
+    var selectedGeminiModel by remember { mutableStateOf(app.geminiModelPreferenceStore.get()) }
 
     Scaffold(
         topBar = {
@@ -557,6 +559,7 @@ fun ToddMainScreen(
                     lastVisualCaptureAt = visualScreen.capturedAt,
                     githubTokenConfigured = app.githubCredentialStore.hasToken(),
                     geminiApiKeyConfigured = geminiApiKeyConfigured,
+                    selectedGeminiModel = selectedGeminiModel,
                     firebaseConfigured = firebaseRuntimeStatus.configured,
                     firebaseProjectId = firebaseRuntimeStatus.projectId,
                     firebaseReason = firebaseRuntimeStatus.reason,
@@ -579,6 +582,11 @@ fun ToddMainScreen(
                         app.geminiApiKeyStore.clear()
                         geminiApiKeyConfigured = false
                         cloudAIStatus = "تم مسح مفتاح Gemini"
+                    },
+                    onGeminiModelChange = { model ->
+                        app.geminiModelPreferenceStore.set(model)
+                        selectedGeminiModel = model
+                        cloudAIStatus = "تم اختيار ${model.displayName}"
                     },
                     onCheckCloudAI = {
                         scope.launch {
@@ -1284,6 +1292,7 @@ fun SettingsView(
     lastVisualCaptureAt: Long,
     githubTokenConfigured: Boolean,
     geminiApiKeyConfigured: Boolean,
+    selectedGeminiModel: GeminiCloudModel,
     firebaseConfigured: Boolean,
     firebaseProjectId: String?,
     firebaseReason: String?,
@@ -1293,6 +1302,7 @@ fun SettingsView(
     cloudAIBusy: Boolean,
     onSaveGeminiApiKey: (String) -> Unit,
     onClearGeminiApiKey: () -> Unit,
+    onGeminiModelChange: (GeminiCloudModel) -> Unit,
     onCheckCloudAI: () -> Unit,
     onCheckLocalAI: () -> Unit,
     onPrepareLocalAI: () -> Unit,
@@ -1359,6 +1369,31 @@ fun SettingsView(
             fontSize = 12.sp,
             color = if (geminiApiKeyConfigured) Color(0xFF10B981) else Color(0xFFF59E0B)
         )
+        Spacer(modifier = Modifier.height(10.dp))
+        Text("اختر نموذج Gemini حسب الحاجة", fontSize = 12.sp, color = Color(0xFFCBD5E1))
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_5,
+                onClick = { onGeminiModelChange(GeminiCloudModel.FLASH_LITE_3_5) },
+                label = { Text("3.5 Flash-Lite") }
+            )
+            FilterChip(
+                selected = selectedGeminiModel == GeminiCloudModel.FLASH_3_8,
+                onClick = { onGeminiModelChange(GeminiCloudModel.FLASH_3_8) },
+                label = { Text("3.8 Flash") }
+            )
+        }
+        Text(
+            if (selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_5) {
+                "للعمل اليومي والطلبات الكثيرة."
+            } else {
+                "للبرمجة والمهام الصعبة."
+            },
+            fontSize = 11.sp,
+            color = Color(0xFF94A3B8)
+        )
+
         Spacer(modifier = Modifier.height(8.dp))
         if (!geminiApiKeyConfigured) {
             OutlinedTextField(

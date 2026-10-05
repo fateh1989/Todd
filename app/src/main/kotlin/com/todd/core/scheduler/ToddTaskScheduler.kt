@@ -211,12 +211,12 @@ class ScheduledTaskWorker(
                     repository.updateTask(
                         it.copy(
                             status = if (schedule.intervalMinutes == null) {
-                                TaskStatus.VERIFIED
+                                TaskStatus.COMPLETED
                             } else {
                                 TaskStatus.WAITING
                             },
                             currentStep = if (schedule.intervalMinutes == null) {
-                                "اكتملت المهمة المجدولة وحُفظت النتيجة."
+                                "اكتمل تنفيذ المهمة المجدولة وحُفظت النتيجة؛ لم تُوسم كمتحققة دون دليل خارجي."
                             } else {
                                 "اكتملت هذه الدورة؛ Todd ينتظر الموعد التالي."
                             },

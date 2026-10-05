@@ -6,6 +6,8 @@ import com.todd.data.repository.ToddRepository
 import com.todd.core.ai.AIRouter
 import com.todd.core.ai.LocalOnDeviceAIProvider
 import com.todd.core.ai.DirectGeminiAIProvider
+import com.todd.core.ai.SelectableGeminiAIProvider
+import com.todd.core.ai.GeminiModelPreferenceStore
 import com.todd.core.ai.GeminiApiKeyStore
 import com.todd.core.ai.GeminiLiveClient
 import com.todd.core.ai.FirebaseRuntimeCredentialStore
@@ -77,6 +79,9 @@ class ToddApplication : Application() {
     lateinit var geminiApiKeyStore: GeminiApiKeyStore
         private set
 
+    lateinit var geminiModelPreferenceStore: GeminiModelPreferenceStore
+        private set
+
     lateinit var rulesEngine: RulesEngine
         private set
 
@@ -112,6 +117,7 @@ class ToddApplication : Application() {
         githubCredentialStore = GitHubCredentialStore(this)
         firebaseRuntimeCredentialStore = FirebaseRuntimeCredentialStore(this)
         geminiApiKeyStore = GeminiApiKeyStore(this)
+        geminiModelPreferenceStore = GeminiModelPreferenceStore(this)
         runCatching {
             FirebaseRuntimeConfig.applyStored(this, firebaseRuntimeCredentialStore)
         }
@@ -180,9 +186,18 @@ class ToddApplication : Application() {
         // The owner enters one Gemini API key in Settings; it is encrypted with Android Keystore.
         // This deliberately does not depend on google-services.json so text chat can work even
         // when Firebase is unavailable on the physical device.
-        val geminiProvider = DirectGeminiAIProvider(
+        val geminiLiteProvider = DirectGeminiAIProvider(
+            apiKeyProvider = { geminiApiKeyStore.getKey() },
+            modelName = "gemini-3.5-flash-lite"
+        )
+        val geminiStrongProvider = DirectGeminiAIProvider(
             apiKeyProvider = { geminiApiKeyStore.getKey() },
             modelName = "gemini-3.8-flash"
+        )
+        val geminiProvider = SelectableGeminiAIProvider(
+            selectionProvider = { geminiModelPreferenceStore.get() },
+            liteProvider = geminiLiteProvider,
+            strongProvider = geminiStrongProvider
         )
 
         autonomousCodingLoop = AutonomousCodingLoop(
