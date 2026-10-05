@@ -31,6 +31,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -315,12 +318,12 @@ fun ToddMainScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .background(Color(0xFF0F172A))
-                .padding(16.dp)
+                .padding(horizontal = 10.dp, vertical = 8.dp)
         ) {
             // Status Card
             StatusCard(state, onStartOverlay)
 
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(8.dp))
 
             when (selectedTab) {
                 0 -> HomeDashboard(
@@ -763,7 +766,7 @@ fun StatusCard(state: ToddState, onStartOverlay: () -> Unit) {
         shape = RoundedCornerShape(16.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -804,14 +807,14 @@ fun StatusCard(state: ToddState, onStartOverlay: () -> Unit) {
                 )
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(4.dp))
             Text(
-                "آخر إجراء تم التحقق منه: ${state.lastVerifiedAction}",
+                "آخر تحقق: ${state.lastVerifiedAction}",
                 fontSize = 12.sp,
                 color = Color(0xFF94A3B8)
             )
             Text(
-                "الخطوة المخططة التالية: ${state.nextPlannedAction}",
+                "التالي: ${state.nextPlannedAction}",
                 fontSize = 12.sp,
                 color = Color(0xFFCBD5E1)
             )
@@ -853,7 +856,7 @@ fun HomeDashboard(
             onToggleMute = onToggleVoiceMute
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(6.dp))
         Text("محادثة Todd", fontWeight = FontWeight.Bold, color = Color.White)
         Spacer(modifier = Modifier.height(6.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -868,20 +871,6 @@ fun HomeDashboard(
                 label = { Text("3.8 قوي") }
             )
         }
-        Text(
-            if (selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_5) {
-                "للعمل اليومي والطلبات الكثيرة"
-            } else {
-                "للبرمجة والمهام الصعبة"
-            },
-            fontSize = 11.sp,
-            color = Color(0xFF94A3B8)
-        )
-        Text(
-            "طلبات Todd اليوم من هذا الجهاز: خفيف ${geminiUsage.flashLiteRequests} • قوي ${geminiUsage.flashRequests}",
-            fontSize = 10.sp,
-            color = Color(0xFF64748B)
-        )
         Spacer(modifier = Modifier.height(8.dp))
 
         LazyColumn(
@@ -916,12 +905,70 @@ fun HomeDashboard(
             }
         }
 
-        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            TextButton(
+                onClick = {
+                    if (quickInput.isNotBlank()) {
+                        onTaskAction(quickInput, quickInput)
+                        quickInput = ""
+                    }
+                },
+                enabled = !isBusy,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+            ) {
+                Text("تحقق بعيد", fontSize = 11.sp)
+            }
+            TextButton(
+                onClick = {
+                    if (quickInput.isNotBlank()) {
+                        onAutonomousCodingTask(quickInput, quickInput)
+                        quickInput = ""
+                    }
+                },
+                enabled = !isBusy,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+            ) {
+                Text("برمجة", fontSize = 11.sp)
+            }
+        }
+
         OutlinedTextField(
             value = quickInput,
             onValueChange = { quickInput = it },
             placeholder = { Text("اكتب لتود...") },
             modifier = Modifier.fillMaxWidth(),
+            maxLines = 4,
+            keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+            keyboardActions = KeyboardActions(
+                onSend = {
+                    val text = quickInput.trim()
+                    if (text.isNotBlank() && !isBusy) {
+                        onSendMessage(text)
+                        quickInput = ""
+                    }
+                }
+            ),
+            trailingIcon = {
+                IconButton(
+                    onClick = {
+                        val text = quickInput.trim()
+                        if (text.isNotBlank() && !isBusy) {
+                            onSendMessage(text)
+                            quickInput = ""
+                        }
+                    },
+                    enabled = quickInput.isNotBlank() && !isBusy
+                ) {
+                    Icon(
+                        Icons.Default.Send,
+                        contentDescription = "إرسال",
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            },
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = Color(0xFF6366F1),
                 unfocusedBorderColor = Color(0xFF334155),
@@ -929,54 +976,6 @@ fun HomeDashboard(
                 unfocusedTextColor = Color.White
             )
         )
-
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.End
-        ) {
-            OutlinedButton(
-                onClick = {
-                    if (quickInput.isNotBlank()) {
-                        onTaskAction(quickInput, quickInput)
-                        quickInput = ""
-                    }
-                },
-                enabled = !isBusy
-            ) {
-                Text("تحقق بعيد")
-            }
-
-            Spacer(modifier = Modifier.width(6.dp))
-            OutlinedButton(
-                onClick = {
-                    if (quickInput.isNotBlank()) {
-                        onAutonomousCodingTask(quickInput, quickInput)
-                        quickInput = ""
-                    }
-                },
-                enabled = !isBusy
-            ) {
-                Text("برمجة ذاتية")
-            }
-
-            Spacer(modifier = Modifier.width(8.dp))
-            Button(
-                onClick = {
-                    val text = quickInput.trim()
-                    if (text.isNotBlank()) {
-                        onSendMessage(text)
-                        quickInput = ""
-                    }
-                },
-                enabled = !isBusy,
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF6366F1))
-            ) {
-                Icon(Icons.Default.Send, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(6.dp))
-                Text("إرسال")
-            }
-        }
     }
 }
 
@@ -1001,17 +1000,17 @@ fun VoiceConversationCard(
 
     Card(
         colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(12.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Column {
-                    Text("المحادثة الصوتية المباشرة", color = Color.White, fontWeight = FontWeight.Bold)
+                    Text("الصوت المباشر", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                     Text(stateLabel, color = Color(0xFF94A3B8), fontSize = 12.sp)
                 }
 
@@ -1037,7 +1036,7 @@ fun VoiceConversationCard(
                             modifier = Modifier.size(16.dp)
                         )
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text(if (active) "إيقاف" else "تحدث مع Todd")
+                        Text(if (active) "إيقاف" else "تحدث")
                     }
                 }
             }
