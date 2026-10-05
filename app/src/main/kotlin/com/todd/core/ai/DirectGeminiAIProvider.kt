@@ -132,8 +132,11 @@ class DirectGeminiAIProvider(
                                 ?.optString("message")
                         }.getOrNull().orEmpty()
                         throw IllegalStateException(
-                            "Gemini API HTTP $code" +
-                                if (message.isNotBlank()) ": $message" else ""
+                            GeminiApiErrorMessages.describe(
+                                statusCode = code,
+                                apiMessage = message,
+                                modelName = modelName
+                            )
                         )
                     }
 

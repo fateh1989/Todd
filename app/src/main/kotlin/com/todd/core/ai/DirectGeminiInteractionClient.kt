@@ -24,10 +24,14 @@ data class DirectToolCall(
 
 class GeminiInteractionApiException(
     val statusCode: Int,
-    val apiMessage: String
+    val apiMessage: String,
+    val modelName: String
 ) : IllegalStateException(
-    "Gemini Interactions API HTTP $statusCode" +
-        if (apiMessage.isNotBlank()) ": $apiMessage" else ""
+    GeminiApiErrorMessages.describe(
+        statusCode = statusCode,
+        apiMessage = apiMessage,
+        modelName = modelName
+    )
 )
 
 /**
@@ -293,7 +297,11 @@ class DirectGeminiInteractionClient(
                         .optJSONObject("error")
                         ?.optString("message")
                 }.getOrNull().orEmpty()
-                throw GeminiInteractionApiException(code, message)
+                throw GeminiInteractionApiException(
+                    statusCode = code,
+                    apiMessage = message,
+                    modelName = body.optString("model", "Gemini")
+                )
             }
 
             return JSONObject(responseText)
