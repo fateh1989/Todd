@@ -59,19 +59,23 @@ class AutonomousCodingLoop(
     private val remoteExecutor: RemoteExecutor,
     private val checkpointStore: AutonomousCheckpointStore = InMemoryAutonomousCheckpointStore(),
     private val pollIntervalMs: Long = 7_500L,
-    private val maxPollsPerIteration: Int = 960
+    private val maxPollsPerIteration: Int = 960,
+    private val onProgress: suspend (taskId: String, message: String) -> Unit = { _, _ -> }
 ) {
 
     suspend fun run(request: AutonomousCodingRequest): Result<AutonomousCodingResult> = runCatching {
         validateRequest(request)
+        onProgress(request.taskId, "بدء المهمة البرمجية والتحقق من مزود الذكاء.")
 
         if (!aiProvider.isAvailable()) {
             throw IllegalStateException("The coding AI provider is not available.")
         }
 
+        onProgress(request.taskId, "قراءة حالة المستودع ${request.repository} على الفرع ${request.branch}.")
         var repositoryInfo = githubTool
             .getRepositoryInfo(request.repository, request.branch)
             .getOrThrow()
+        onProgress(request.taskId, "رأس الفرع الحالي: ${repositoryInfo.latestCommitSha.take(12)}")
 
         var checkpoint = checkpointStore.load(request.taskId)
         if (checkpoint != null && !checkpointMatches(checkpoint, request)) {
@@ -96,6 +100,7 @@ class AutonomousCodingLoop(
                             "Checkpoint is VERIFYING but has no remote verification job ID."
                         )
 
+                    onProgress(request.taskId, "استئناف التحقق البعيد للالتزام ${committedSha.take(12)}.")
                     remoteExecutor.startJob(
                         verificationRequest(
                             request = request,
@@ -105,7 +110,9 @@ class AutonomousCodingLoop(
                         )
                     ).getOrThrow()
 
+                    onProgress(request.taskId, "انتظار نتيجة GitHub Actions للمهمة $verifyJobId.")
                     val remoteState = waitForTerminalState(verifyJobId)
+                    onProgress(request.taskId, "انتهى التحقق البعيد بالحالة: ${remoteState.status}.")
                     when (remoteState.status) {
                         RemoteJobStatus.COMPLETED -> {
                             checkpointStore.delete(request.taskId)
@@ -196,6 +203,7 @@ class AutonomousCodingLoop(
         }
 
         for (iteration in firstIteration..request.maxIterations) {
+            onProgress(request.taskId, "الدورة $iteration من ${request.maxIterations}: فحص المستودع.")
             checkpointStore.save(
                 AutonomousCheckpoint(
                     request = request,
@@ -207,6 +215,7 @@ class AutonomousCodingLoop(
                 )
             )
 
+            onProgress(request.taskId, "قراءة شجرة ملفات المستودع.")
             val repositoryFiles = githubTool
                 .listRepositoryFiles(request.repository, request.branch)
                 .getOrThrow()
@@ -218,12 +227,17 @@ class AutonomousCodingLoop(
                 throw IllegalStateException("Repository tree contains no readable text files.")
             }
 
+            onProgress(request.taskId, "اختيار الملفات المرتبطة بالمهمة بواسطة نموذج البرمجة.")
             val selectedPaths = selectFiles(
                 request = request,
                 repositoryFiles = repositoryFiles,
                 failureContext = failureContext
             )
 
+            onProgress(
+                request.taskId,
+                "سيقرأ Todd: " + selectedPaths.joinToString(limit = 8, truncated = "...")
+            )
             val selectedFiles = selectedPaths.map { path ->
                 githubTool.readFile(
                     repoFullName = request.repository,
@@ -232,6 +246,7 @@ class AutonomousCodingLoop(
                 ).getOrThrow()
             }
 
+            onProgress(request.taskId, "تحليل الملفات وصياغة أقل تعديل مطلوب.")
             val patch = proposePatch(
                 request = request,
                 headSha = headSha,
@@ -249,6 +264,10 @@ class AutonomousCodingLoop(
             }
 
             val changedPaths = patch.changes.map { it.path }
+            onProgress(
+                request.taskId,
+                "التعديل المقترح على: " + changedPaths.joinToString()
+            )
 
             checkpointStore.save(
                 AutonomousCheckpoint(
@@ -262,6 +281,10 @@ class AutonomousCodingLoop(
                 )
             )
 
+            onProgress(
+                request.taskId,
+                "إنشاء Commit في GitHub: " + patch.commitMessage.ifBlank { "Todd autonomous iteration $iteration" }
+            )
             val newCommit = githubTool.createCommit(
                 repoFullName = request.repository,
                 branch = request.branch,
@@ -273,6 +296,7 @@ class AutonomousCodingLoop(
 
             commits += newCommit
             headSha = newCommit
+            onProgress(request.taskId, "تم إنشاء الالتزام ${newCommit.take(12)}.")
 
             val verifyJobId = "${request.taskId}-verify-$iteration"
 
@@ -290,6 +314,7 @@ class AutonomousCodingLoop(
                 )
             )
 
+            onProgress(request.taskId, "تشغيل التحقق البعيد GitHub Actions للالتزام ${newCommit.take(12)}.")
             remoteExecutor.startJob(
                 verificationRequest(
                     request = request,
@@ -299,7 +324,9 @@ class AutonomousCodingLoop(
                 )
             ).getOrThrow()
 
+            onProgress(request.taskId, "التحقق البعيد يعمل الآن؛ انتظار النتيجة.")
             val remoteState = waitForTerminalState(verifyJobId)
+            onProgress(request.taskId, "نتيجة التحقق البعيد: ${remoteState.status}.")
 
             when (remoteState.status) {
                 RemoteJobStatus.COMPLETED -> {
@@ -328,6 +355,7 @@ class AutonomousCodingLoop(
                 }
 
                 else -> {
+                    onProgress(request.taskId, "فشل التحقق؛ سيقرأ Todd الخطأ ويبدأ دورة إصلاح جديدة إن بقيت محاولات.")
                     failureContext = buildFailureContext(
                         iteration = iteration,
                         commitSha = newCommit,
