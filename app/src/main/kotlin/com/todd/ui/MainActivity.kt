@@ -3,6 +3,7 @@ package com.todd.ui
 import android.Manifest
 import android.content.Intent
 import android.content.Context
+import android.content.ComponentName
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
@@ -31,6 +32,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.lifecycleScope
 import com.todd.ToddApplication
 import com.todd.core.model.*
@@ -53,6 +55,8 @@ import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
 
+    private var settingsRefreshVersion by mutableIntStateOf(0)
+
     private val microphonePermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (granted) startVoiceSession()
@@ -74,7 +78,12 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
+            settingsRefreshVersion
             ToddMainScreen(
+                accessibilityEnabled = isToddAccessibilityEnabled(),
+                notificationAccessEnabled = NotificationManagerCompat
+                    .getEnabledListenerPackages(this)
+                    .contains(packageName),
                 onStartOverlay = { checkOverlayPermissionAndStart() },
                 onOpenAccessibility = {
                     startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -88,6 +97,22 @@ class MainActivity : ComponentActivity() {
                 onStopVisualScreen = { stopVisualScreenCapture() }
             )
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        settingsRefreshVersion += 1
+    }
+
+    private fun isToddAccessibilityEnabled(): Boolean {
+        val expected = ComponentName(this, ToddAccessibilityService::class.java).flattenToString()
+        val enabled = Settings.Secure.getString(
+            contentResolver,
+            Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
+        ).orEmpty()
+        return enabled
+            .split(':')
+            .any { it.equals(expected, ignoreCase = true) }
     }
 
     private fun requestVisualScreenCapture() {
@@ -148,6 +173,8 @@ class MainActivity : ComponentActivity() {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ToddMainScreen(
+    accessibilityEnabled: Boolean,
+    notificationAccessEnabled: Boolean,
     onStartOverlay: () -> Unit,
     onOpenAccessibility: () -> Unit,
     onOpenNotificationAccess: () -> Unit,
@@ -557,6 +584,8 @@ fun ToddMainScreen(
                     state = state,
                     visualScreenRunning = visualScreen.isRunning,
                     lastVisualCaptureAt = visualScreen.capturedAt,
+                    accessibilityEnabled = accessibilityEnabled,
+                    notificationAccessEnabled = notificationAccessEnabled,
                     githubTokenConfigured = app.githubCredentialStore.hasToken(),
                     geminiApiKeyConfigured = geminiApiKeyConfigured,
                     selectedGeminiModel = selectedGeminiModel,
@@ -1290,6 +1319,8 @@ fun SettingsView(
     state: ToddState,
     visualScreenRunning: Boolean,
     lastVisualCaptureAt: Long,
+    accessibilityEnabled: Boolean,
+    notificationAccessEnabled: Boolean,
     githubTokenConfigured: Boolean,
     geminiApiKeyConfigured: Boolean,
     selectedGeminiModel: GeminiCloudModel,
@@ -1537,9 +1568,13 @@ fun SettingsView(
         Text("فهم الشاشة", fontWeight = FontWeight.Bold, color = Color.White)
         Spacer(modifier = Modifier.height(8.dp))
         Text(
-            "فعّل خدمة Todd لإمكانية الوصول ليقرأ عناصر الشاشة ويستخدمها كسياق أثناء العمل.",
+            if (accessibilityEnabled) {
+                "فهم الشاشة عبر إمكانية الوصول: مفعّل."
+            } else {
+                "فهم الشاشة عبر إمكانية الوصول: غير مفعّل."
+            },
             fontSize = 12.sp,
-            color = Color(0xFF94A3B8)
+            color = if (accessibilityEnabled) Color(0xFF10B981) else Color(0xFFF59E0B)
         )
         Spacer(modifier = Modifier.height(8.dp))
         Button(onClick = onOpenAccessibility) {
@@ -1549,6 +1584,16 @@ fun SettingsView(
         }
 
         Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            if (notificationAccessEnabled) {
+                "وصول الإشعارات: مفعّل."
+            } else {
+                "وصول الإشعارات: غير مفعّل."
+            },
+            fontSize = 12.sp,
+            color = if (notificationAccessEnabled) Color(0xFF10B981) else Color(0xFFF59E0B)
+        )
+        Spacer(modifier = Modifier.height(6.dp))
         OutlinedButton(onClick = onOpenNotificationAccess) {
             Icon(Icons.Default.Notifications, contentDescription = null, modifier = Modifier.size(16.dp))
             Spacer(modifier = Modifier.width(6.dp))
