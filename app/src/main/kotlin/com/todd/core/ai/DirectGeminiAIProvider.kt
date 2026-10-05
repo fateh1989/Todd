@@ -11,7 +11,7 @@ import java.net.URL
 
 internal fun thinkingLevelForGeminiModel(modelName: String): String =
     when {
-        modelName == "gemini-3.1-flash-lite" -> "minimal"
+        modelName == "gemini-3.5-flash-lite" -> "minimal"
         modelName == "gemini-3.8-flash" -> "medium"
         else -> "low"
     }
