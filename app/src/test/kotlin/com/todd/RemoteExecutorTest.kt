@@ -155,7 +155,12 @@ class RemoteExecutorTest {
         }
 
         override suspend fun getRun(runId: Long): Result<RemoteRunSnapshot> =
-            Result.success(snapshot)
+            Result.success(
+                snapshot.copy(
+                    runId = runId,
+                    runUrl = "https://github.com/fateh1989/Todd/actions/runs/$runId"
+                )
+            )
 
         override suspend fun cancel(runId: Long): Result<Boolean> = Result.success(true)
     }
