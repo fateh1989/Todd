@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 import java.io.FileOutputStream
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class VisualScreenSnapshot(
     val filePath: String? = null,
@@ -65,6 +66,7 @@ class ScreenCaptureService : Service() {
     private var workerHandler: Handler? = null
     private var lastCaptureAt: Long = 0L
     private var lastOcrAt: Long = 0L
+    private val ocrInFlight = AtomicBoolean(false)
 
     private val projectionCallback = object : MediaProjection.Callback() {
         override fun onStop() {
@@ -134,7 +136,18 @@ class ScreenCaptureService : Service() {
         projection = newProjection
         newProjection.registerCallback(projectionCallback, null)
 
-        val (width, height, density) = currentDisplayInfo()
+        val (displayWidth, displayHeight, density) = currentDisplayInfo()
+        val scale = minOf(
+            1f,
+            MAX_CAPTURE_LONG_EDGE.toFloat() / maxOf(displayWidth, displayHeight).toFloat()
+        )
+        val width = (displayWidth * scale).toInt().coerceAtLeast(1)
+        val height = (displayHeight * scale).toInt().coerceAtLeast(1)
+        val captureDensity = (density * scale).toInt().coerceAtLeast(1)
+
+        lastCaptureAt = 0L
+        lastOcrAt = 0L
+        ocrInFlight.set(false)
 
         workerThread = HandlerThread("ToddScreenCapture").apply { start() }
         workerHandler = Handler(workerThread!!.looper)
@@ -143,7 +156,7 @@ class ScreenCaptureService : Service() {
             width,
             height,
             PixelFormat.RGBA_8888,
-            3
+            2
         )
         imageReader = reader
 
@@ -171,17 +184,21 @@ class ScreenCaptureService : Service() {
                 val cropped = Bitmap.createBitmap(padded, 0, 0, width, height)
                 padded.recycle()
 
-                val target = File(cacheDir, "todd_latest_screen.png")
+                val target = File(cacheDir, "todd_latest_screen.jpg")
                 FileOutputStream(target).use { output ->
-                    cropped.compress(Bitmap.CompressFormat.PNG, 90, output)
+                    cropped.compress(Bitmap.CompressFormat.JPEG, 80, output)
                 }
 
                 ScreenCaptureStore.update(target, width, height, now)
 
-                if (now - lastOcrAt >= OCR_INTERVAL_MS) {
+                if (
+                    now - lastOcrAt >= OCR_INTERVAL_MS &&
+                    ocrInFlight.compareAndSet(false, true)
+                ) {
                     lastOcrAt = now
                     ScreenOcrProcessor.process(cropped, now) {
                         if (!cropped.isRecycled) cropped.recycle()
+                        ocrInFlight.set(false)
                     }
                 } else {
                     cropped.recycle()
@@ -195,7 +212,7 @@ class ScreenCaptureService : Service() {
             "ToddVisualScreen",
             width,
             height,
-            density,
+            captureDensity,
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
             reader.surface,
             null,
@@ -267,7 +284,8 @@ class ScreenCaptureService : Service() {
 
         private const val CHANNEL_ID = "todd_screen_capture"
         private const val NOTIFICATION_ID = 1002
-        private const val CAPTURE_INTERVAL_MS = 1200L
-        private const val OCR_INTERVAL_MS = 2500L
+        private const val MAX_CAPTURE_LONG_EDGE = 1280
+        private const val CAPTURE_INTERVAL_MS = 4000L
+        private const val OCR_INTERVAL_MS = 12000L
     }
 }
