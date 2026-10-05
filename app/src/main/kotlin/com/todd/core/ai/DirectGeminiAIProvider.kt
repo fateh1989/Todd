@@ -9,6 +9,13 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 
+internal fun thinkingLevelForGeminiModel(modelName: String): String =
+    when {
+        modelName == "gemini-3.5-flash-lite" -> "minimal"
+        modelName == "gemini-3.8-flash" -> "medium"
+        else -> "low"
+    }
+
 class DirectGeminiAIProvider(
     private val apiKeyProvider: () -> String?,
     private val modelName: String = "gemini-3.8-flash",
@@ -91,13 +98,15 @@ class DirectGeminiAIProvider(
                     .put(
                         "generationConfig",
                         JSONObject()
-                            // Gemini 3.8 Flash thinks by default. A tiny output cap can be
-                            // consumed entirely by thinking and produce HTTP 200 with no text.
-                            // Keep the output budget usable and request LOW thinking for fast chat.
+                            // Respect the owner's manual model choice: Lite stays very
+                            // fast for frequent work; 3.8 gets a deeper budget for coding.
                             .put("maxOutputTokens", maxOf(request.maxTokens, 512))
                             .put(
                                 "thinkingConfig",
-                                JSONObject().put("thinkingLevel", "low")
+                                JSONObject().put(
+                                    "thinkingLevel",
+                                    thinkingLevelForGeminiModel(modelName)
+                                )
                             )
                     )
 
