@@ -129,9 +129,9 @@ class ToddAccessibilityService : AccessibilityService() {
     }
 
     companion object {
-        private const val MIN_CAPTURE_INTERVAL_MS = 1000L
-        private const val MAX_DEPTH = 16
-        private const val MAX_SCREEN_CONTEXT_CHARS = 12000
+        private const val MIN_CAPTURE_INTERVAL_MS = 3000L
+        private const val MAX_DEPTH = 10
+        private const val MAX_SCREEN_CONTEXT_CHARS = 6000
 
         @Volatile
         var instance: ToddAccessibilityService? = null
