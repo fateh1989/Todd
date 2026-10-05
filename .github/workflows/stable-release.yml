@@ -8,9 +8,6 @@ jobs:
     name: Build Stable Signed Todd APK
     runs-on: ubuntu-latest
     env:
-      TODD_SIGNING_STORE_PASSWORD: ${{ secrets.TODD_SIGNING_STORE_PASSWORD }}
-      TODD_SIGNING_KEY_ALIAS: ${{ secrets.TODD_SIGNING_KEY_ALIAS }}
-      TODD_SIGNING_KEY_PASSWORD: ${{ secrets.TODD_SIGNING_KEY_PASSWORD }}
       EXPECTED_TODD_CERT_SHA256: 2354bcf2cbc13c549948898626cbc45509382b6f9b9e246d76355cce4d9e0d92
 
     steps:
@@ -30,21 +27,44 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
-    - name: Require stable signing secrets
+    - name: Require stable signing bundle
       env:
-        TODD_KEYSTORE_BASE64: ${{ secrets.TODD_KEYSTORE_BASE64 }}
+        TODD_SIGNING_BUNDLE: ${{ secrets.TODD_SIGNING_BUNDLE }}
       run: |
         set -euo pipefail
+
+        if [ -z "$TODD_SIGNING_BUNDLE" ]; then
+          echo "ERROR: TODD_SIGNING_BUNDLE is not configured."
+          exit 1
+        fi
+
+        extract_value() {
+          printf '%s\n' "$TODD_SIGNING_BUNDLE" | tr -d '\r' | sed -n "s/^$1=//p" | head -n 1
+        }
+
+        TODD_KEYSTORE_BASE64="$(extract_value TODD_KEYSTORE_BASE64)"
+        TODD_SIGNING_STORE_PASSWORD="$(extract_value TODD_SIGNING_STORE_PASSWORD)"
+        TODD_SIGNING_KEY_ALIAS="$(extract_value TODD_SIGNING_KEY_ALIAS)"
+        TODD_SIGNING_KEY_PASSWORD="$(extract_value TODD_SIGNING_KEY_PASSWORD)"
+
         for value in "$TODD_KEYSTORE_BASE64" "$TODD_SIGNING_STORE_PASSWORD" "$TODD_SIGNING_KEY_ALIAS" "$TODD_SIGNING_KEY_PASSWORD"; do
           if [ -z "$value" ]; then
-            echo "ERROR: Stable Todd signing secrets are incomplete."
+            echo "ERROR: TODD_SIGNING_BUNDLE is missing one or more required values."
             exit 1
           fi
         done
+
         SIGNING_FILE="$RUNNER_TEMP/todd-stable-signing.jks"
         printf '%s' "$TODD_KEYSTORE_BASE64" | base64 --decode > "$SIGNING_FILE"
-        echo "TODD_SIGNING_STORE_FILE=$SIGNING_FILE" >> "$GITHUB_ENV"
-        echo "Stable Todd signing material loaded."
+
+        {
+          echo "TODD_SIGNING_STORE_FILE=$SIGNING_FILE"
+          echo "TODD_SIGNING_STORE_PASSWORD=$TODD_SIGNING_STORE_PASSWORD"
+          echo "TODD_SIGNING_KEY_ALIAS=$TODD_SIGNING_KEY_ALIAS"
+          echo "TODD_SIGNING_KEY_PASSWORD=$TODD_SIGNING_KEY_PASSWORD"
+        } >> "$GITHUB_ENV"
+
+        echo "Stable Todd signing material loaded from one bundle secret."
 
     - name: Configure Google Services
       env:
