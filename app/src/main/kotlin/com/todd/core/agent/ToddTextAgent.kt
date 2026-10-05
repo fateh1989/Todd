@@ -14,6 +14,9 @@ import com.todd.core.ai.AIRequest
 import com.todd.core.ai.AIResponse
 import com.todd.core.ai.AIRouter
 import com.todd.core.ai.AISource
+import com.todd.core.ai.DirectGeminiInteractionClient
+import com.todd.core.ai.DirectToolCall
+import com.todd.core.ai.DirectToolDefinition
 import com.todd.core.ai.FirebaseRuntimeConfig
 import com.todd.core.ai.ProviderType
 import com.todd.core.model.AIProviderMode
@@ -36,6 +39,8 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import java.io.File
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Tool-capable text agent for the main Todd chat.
@@ -53,6 +58,7 @@ class ToddTextAgent(
     private val taskScheduler: ToddTaskScheduler,
     private val stateMachine: ToddStateMachine,
     private val rulesEngine: RulesEngine,
+    private val directInteractionClient: DirectGeminiInteractionClient? = null,
     private val modelName: String = "gemini-3.8-flash"
 ) {
 
@@ -60,7 +66,23 @@ class ToddTextAgent(
         request: AIRequest,
         mode: AIProviderMode
     ): Result<AIResponse> = withContext(Dispatchers.IO) {
-        if (mode == AIProviderMode.LOCAL_ONLY || !FirebaseRuntimeConfig.current().configured) {
+        if (mode == AIProviderMode.LOCAL_ONLY) {
+            return@withContext aiRouter.route(request, mode)
+        }
+
+        val prompt = buildPrompt(request)
+        val directClient = directInteractionClient
+        if (directClient != null && directClient.isAvailable()) {
+            return@withContext directClient.respond(
+                request = request,
+                prompt = prompt,
+                tools = directToolDefinitions(),
+                executeTool = { call -> executeDirectTool(call) },
+                maxToolRounds = MAX_TOOL_ROUNDS
+            )
+        }
+
+        if (!FirebaseRuntimeConfig.current().configured) {
             return@withContext aiRouter.route(request, mode)
         }
 
@@ -79,7 +101,6 @@ class ToddTextAgent(
             )
             val chat = model.startChat()
 
-            val prompt = buildPrompt(request)
             var response = sendInitialMessage(chat, prompt, request.screenImagePath)
 
             repeat(MAX_TOOL_ROUNDS) {
@@ -261,16 +282,135 @@ class ToddTextAgent(
         )
     )
 
+    private fun directToolDefinitions(): List<DirectToolDefinition> = listOf(
+        directTool(
+            name = "getCurrentDeviceContext",
+            description = "Read Todd's current merged phone context: accessibility screen data, local OCR, visual capture metadata, and recent notifications."
+        ),
+        directTool(
+            name = "checkRepositoryStatus",
+            description = "Read the live branch and latest commit for a GitHub repository.",
+            params = mapOf(
+                "repository" to "Repository in owner/name form.",
+                "branch" to "Branch name, normally main."
+            )
+        ),
+        directTool(
+            name = "checkLatestWorkflow",
+            description = "Read the latest GitHub Actions workflow run and artifact for a repository branch.",
+            params = mapOf(
+                "repository" to "Repository in owner/name form.",
+                "branch" to "Branch name, normally main."
+            )
+        ),
+        directTool(
+            name = "startAutonomousCoding",
+            description = "Start Todd's persistent autonomous coding loop for the current project. Use this when the owner asks Todd to implement, fix, change, or build code.",
+            params = mapOf(
+                "objective" to "Exact coding objective from the owner."
+            ),
+            required = listOf("objective")
+        ),
+        directTool(
+            name = "scheduleTask",
+            description = "Schedule a Todd task to run later. repeatMinutes is optional; recurring schedules must be at least 15 minutes apart.",
+            params = mapOf(
+                "objective" to "What Todd should do at the scheduled time.",
+                "delayMinutes" to "Minutes from now before the first run.",
+                "repeatMinutes" to "Optional recurrence in minutes; omit for one-time."
+            ),
+            required = listOf("objective", "delayMinutes")
+        ),
+        directTool(
+            name = "checkTaskStatus",
+            description = "Read the durable Todd task state, current step, failure, and verification evidence for a task ID.",
+            params = mapOf(
+                "taskId" to "Todd task ID returned when a task was started."
+            ),
+            required = listOf("taskId")
+        ),
+        directTool(
+            name = "checkLatestTask",
+            description = "Read the newest durable task for the current or specified Todd project. Use this when the owner asks where Todd reached or what it is doing.",
+            params = mapOf(
+                "projectId" to "Todd project ID. Omit to use the active project."
+            )
+        ),
+        directTool(
+            name = "checkRemoteJob",
+            description = "Reconnect to a Todd remote verification job and return its live status and evidence.",
+            params = mapOf(
+                "jobId" to "Todd remote job ID."
+            ),
+            required = listOf("jobId")
+        ),
+        directTool(
+            name = "cancelRemoteJob",
+            description = "Cancel a Todd remote verification job when the owner explicitly asked to cancel it.",
+            params = mapOf(
+                "jobId" to "Todd remote job ID."
+            ),
+            required = listOf("jobId")
+        )
+    )
+
+    private fun directTool(
+        name: String,
+        description: String,
+        params: Map<String, String> = emptyMap(),
+        required: List<String> = emptyList()
+    ): DirectToolDefinition {
+        val properties = JSONObject()
+        params.forEach { (paramName, paramDescription) ->
+            properties.put(
+                paramName,
+                JSONObject()
+                    .put("type", "string")
+                    .put("description", paramDescription)
+            )
+        }
+
+        val parameters = JSONObject()
+            .put("type", "object")
+            .put("properties", properties)
+        if (required.isNotEmpty()) {
+            parameters.put("required", JSONArray(required))
+        }
+
+        return DirectToolDefinition(
+            name = name,
+            description = description,
+            parameters = parameters
+        )
+    }
+
     private suspend fun executeTool(call: FunctionCallPart): FunctionResponsePart {
-        val response: JsonObject = when (call.name) {
+        val response = executeToolJson(call.name) { name ->
+            call.args[name]?.jsonPrimitive?.content?.trim().orEmpty()
+        }
+        return FunctionResponsePart(call.name, response, call.id)
+    }
+
+    private suspend fun executeDirectTool(call: DirectToolCall): JSONObject {
+        val response = executeToolJson(call.name) { name ->
+            call.arguments.optString(name, "").trim()
+        }
+        return JSONObject(response.toString())
+    }
+
+    private suspend fun executeToolJson(
+        name: String,
+        argValue: (String) -> String
+    ): JsonObject {
+        return when (name) {
             "getCurrentDeviceContext" -> buildJsonObject {
                 put("ok", true)
                 put("context", DeviceContextProvider.currentTextContext())
             }
 
             "checkRepositoryStatus" -> {
-                val repo = arg(call, "repository").ifBlank { "fateh1989/Todd" }
-                val branch = arg(call, "branch").ifBlank { "main" }
+                val repo = argValue("repository").ifBlank { "fateh1989/Todd" }
+                val branch = argValue("branch").ifBlank { "main" }
 
                 githubTool.getRepositoryInfo(repo, branch).fold(
                     onSuccess = { info ->
@@ -287,8 +427,8 @@ class ToddTextAgent(
             }
 
             "checkLatestWorkflow" -> {
-                val repo = arg(call, "repository").ifBlank { "fateh1989/Todd" }
-                val branch = arg(call, "branch").ifBlank { "main" }
+                val repo = argValue("repository").ifBlank { "fateh1989/Todd" }
+                val branch = argValue("branch").ifBlank { "main" }
 
                 githubTool.getLatestWorkflowRun(repo, branch).fold(
                     onSuccess = { run ->
@@ -310,7 +450,7 @@ class ToddTextAgent(
             }
 
             "startAutonomousCoding" -> {
-                val objective = arg(call, "objective")
+                val objective = argValue("objective")
                 if (objective.isBlank()) {
                     buildJsonObject {
                         put("ok", false)
@@ -352,9 +492,9 @@ class ToddTextAgent(
             }
 
             "scheduleTask" -> {
-                val objective = arg(call, "objective")
-                val delay = arg(call, "delayMinutes").toLongOrNull()
-                val repeat = arg(call, "repeatMinutes").toLongOrNull()
+                val objective = argValue("objective")
+                val delay = argValue("delayMinutes").toLongOrNull()
+                val repeat = argValue("repeatMinutes").toLongOrNull()
                 val projectId =
                     stateMachine.state.value.activeProjectId ?: "todd-main"
 
@@ -426,7 +566,7 @@ class ToddTextAgent(
             }
 
             "checkTaskStatus" -> {
-                val taskId = arg(call, "taskId")
+                val taskId = argValue("taskId")
                 if (taskId.isBlank()) {
                     buildJsonObject {
                         put("ok", false)
@@ -447,7 +587,7 @@ class ToddTextAgent(
             }
 
             "checkLatestTask" -> {
-                val requestedProjectId = arg(call, "projectId")
+                val requestedProjectId = argValue("projectId")
                 val projectId = requestedProjectId.ifBlank {
                     stateMachine.state.value.activeProjectId ?: "todd-main"
                 }
@@ -464,7 +604,7 @@ class ToddTextAgent(
             }
 
             "checkRemoteJob" -> {
-                val jobId = arg(call, "jobId")
+                val jobId = argValue("jobId")
                 if (jobId.isBlank()) {
                     buildJsonObject {
                         put("ok", false)
@@ -490,7 +630,7 @@ class ToddTextAgent(
             }
 
             "cancelRemoteJob" -> {
-                val jobId = arg(call, "jobId")
+                val jobId = argValue("jobId")
                 if (jobId.isBlank()) {
                     buildJsonObject {
                         put("ok", false)
@@ -512,11 +652,9 @@ class ToddTextAgent(
 
             else -> buildJsonObject {
                 put("ok", false)
-                put("error", "Unknown Todd tool: ${call.name}")
+                put("error", "Unknown Todd tool: $name")
             }
         }
-
-        return FunctionResponsePart(call.name, response, call.id)
     }
 
     private fun taskJson(task: com.todd.core.model.Task): JsonObject = buildJsonObject {
@@ -533,9 +671,6 @@ class ToddTextAgent(
         put("failure", task.failureCause ?: "")
         put("updatedAt", task.updatedAt)
     }
-
-    private fun arg(call: FunctionCallPart, name: String): String =
-        call.args[name]?.jsonPrimitive?.content?.trim().orEmpty()
 
     private fun errorJson(error: Throwable): JsonObject = buildJsonObject {
         put("ok", false)
