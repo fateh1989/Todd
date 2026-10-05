@@ -19,6 +19,7 @@ import com.todd.core.remote.GitHubActionsRemoteGateway
 import com.todd.core.remote.RemoteExecutor
 import com.todd.core.remote.RemoteJobStatus
 import com.todd.core.agent.AutonomousCodingLoop
+import com.todd.core.agent.AutonomousTaskCoordinator
 import com.todd.core.model.Project
 import com.todd.core.model.TaskStatus
 import kotlinx.coroutines.CoroutineScope
@@ -61,6 +62,9 @@ class ToddApplication : Application() {
         private set
 
     lateinit var autonomousCodingLoop: AutonomousCodingLoop
+        private set
+
+    lateinit var autonomousTaskCoordinator: AutonomousTaskCoordinator
         private set
 
     override fun onCreate() {
@@ -148,6 +152,13 @@ class ToddApplication : Application() {
             aiProvider = geminiProvider,
             githubTool = githubTool,
             remoteExecutor = remoteExecutor
+        )
+        autonomousTaskCoordinator = AutonomousTaskCoordinator(
+            repository = repository,
+            stateMachine = stateMachine,
+            githubCredentialStore = githubCredentialStore,
+            codingLoop = autonomousCodingLoop,
+            scope = appScope
         )
 
         aiRouter = AIRouter(

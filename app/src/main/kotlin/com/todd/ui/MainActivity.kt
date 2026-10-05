@@ -440,109 +440,12 @@ fun ToddMainScreen(
                         }
                     },
                     onAutonomousCodingTask = { title, goal ->
-                        scope.launch {
-                            val task = stateMachine.planTask(
-                                taskId = "code-${System.currentTimeMillis()}",
-                                projectId = projectId,
-                                title = title,
-                                goal = goal,
-                                criteria = "Todd must produce a commit and remote Android verification must succeed"
-                            )
-                            app.repository.saveTask(task)
-
-                            when {
-                                !app.githubCredentialStore.hasToken() -> {
-                                    app.repository.updateTask(
-                                        task.copy(
-                                            status = TaskStatus.BLOCKED,
-                                            currentStep = "أضف تفويض GitHub من الإعدادات حتى يستطيع Todd قراءة وكتابة المستودع.",
-                                            updatedAt = System.currentTimeMillis()
-                                        )
-                                    )
-                                }
-
-                                !FirebaseRuntimeConfig.current().configured -> {
-                                    app.repository.updateTask(
-                                        task.copy(
-                                            status = TaskStatus.BLOCKED,
-                                            currentStep = "نسخة التطبيق الحالية لا تحتوي إعداد Firebase الحقيقي اللازم للذكاء السحابي.",
-                                            updatedAt = System.currentTimeMillis()
-                                        )
-                                    )
-                                }
-
-                                else -> {
-                                    val project = app.repository.getProjectById(projectId)
-                                    val repoName = project?.repository
-                                        ?: if (projectId == "todd-main") "fateh1989/Todd" else null
-                                    val branch = project?.branch?.ifBlank { "main" } ?: "main"
-
-                                    if (repoName == null) {
-                                        app.repository.updateTask(
-                                            task.copy(
-                                                status = TaskStatus.BLOCKED,
-                                                currentStep = "لا يوجد مستودع مرتبط بهذا المشروع.",
-                                                updatedAt = System.currentTimeMillis()
-                                            )
-                                        )
-                                    } else {
-                                        app.repository.updateTask(
-                                            task.copy(
-                                                status = TaskStatus.IN_PROGRESS,
-                                                currentStep = "Todd يفحص المستودع ويحدد الملفات اللازمة قبل أي تعديل.",
-                                                updatedAt = System.currentTimeMillis()
-                                            )
-                                        )
-
-                                        val result = app.autonomousCodingLoop.run(
-                                            AutonomousCodingRequest(
-                                                taskId = task.id,
-                                                projectId = projectId,
-                                                repository = repoName,
-                                                branch = branch,
-                                                objective = goal,
-                                                completionCriteria = task.completionCriteria,
-                                                maxIterations = 4
-                                            )
-                                        )
-
-                                        result.fold(
-                                            onSuccess = { coding ->
-                                                app.repository.updateTask(
-                                                    task.copy(
-                                                        status = if (coding.success) {
-                                                            TaskStatus.VERIFIED
-                                                        } else {
-                                                            TaskStatus.FAILED
-                                                        },
-                                                        currentStep = if (coding.success) {
-                                                            "اكتمل التعديل البرمجي وتحقق البناء والاختبار عن بُعد."
-                                                        } else {
-                                                            "انتهت دورة البرمجة بدون تحقق ناجح."
-                                                        },
-                                                        lastEvidence = coding.evidenceUrl
-                                                            ?: coding.finalCommitSha
-                                                            ?: task.lastEvidence,
-                                                        failureCause = coding.failureMessage,
-                                                        updatedAt = System.currentTimeMillis()
-                                                    )
-                                                )
-                                            },
-                                            onFailure = { error ->
-                                                app.repository.updateTask(
-                                                    task.copy(
-                                                        status = TaskStatus.FAILED,
-                                                        currentStep = "توقفت دورة البرمجة الذاتية بسبب خطأ فعلي.",
-                                                        failureCause = error.message,
-                                                        updatedAt = System.currentTimeMillis()
-                                                    )
-                                                )
-                                            }
-                                        )
-                                    }
-                                }
-                            }
-                        }
+                        app.autonomousTaskCoordinator.start(
+                            projectId = projectId,
+                            title = title,
+                            goal = goal,
+                            maxIterations = 4
+                        )
                     }
                 )
                 1 -> ProjectsView(projects)
