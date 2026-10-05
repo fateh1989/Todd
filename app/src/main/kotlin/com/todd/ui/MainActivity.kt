@@ -39,6 +39,8 @@ import com.todd.core.ai.LocalOnDeviceAIProvider
 import com.todd.core.remote.RemoteExecutionMode
 import com.todd.core.remote.RemoteJobRequest
 import com.todd.core.agent.AutonomousCodingRequest
+import com.todd.core.diagnostics.ToddDiagnosticReport
+import com.todd.core.diagnostics.DiagnosticStatus
 import com.todd.service.overlay.FloatingToddService
 import com.todd.service.accessibility.ToddAccessibilityService
 import com.todd.service.screen.ScreenCaptureService
@@ -175,6 +177,8 @@ fun ToddMainScreen(
     var localAIBusy by remember { mutableStateOf(false) }
     var cloudAIStatus by remember { mutableStateOf("لم يتم اختبار الاتصال السحابي بعد") }
     var cloudAIBusy by remember { mutableStateOf(false) }
+    var diagnosticsBusy by remember { mutableStateOf(false) }
+    var diagnosticsReport by remember { mutableStateOf<ToddDiagnosticReport?>(null) }
     var firebaseRuntimeStatus by remember { mutableStateOf(FirebaseRuntimeConfig.current()) }
 
     Scaffold(
@@ -579,6 +583,15 @@ fun ToddMainScreen(
                         app.autonomousTaskCoordinator.resumePending()
                     },
                     onClearGitHubToken = { app.githubCredentialStore.clearToken() },
+                    diagnosticsReport = diagnosticsReport,
+                    diagnosticsBusy = diagnosticsBusy,
+                    onRunDiagnostics = {
+                        scope.launch {
+                            diagnosticsBusy = true
+                            diagnosticsReport = runCatching { app.diagnostics.run() }.getOrNull()
+                            diagnosticsBusy = false
+                        }
+                    },
                     onAIModeChange = { mode -> stateMachine.setAIMode(mode) },
                     onOpenAccessibility = onOpenAccessibility,
                     onOpenNotificationAccess = onOpenNotificationAccess,
@@ -991,6 +1004,9 @@ fun SettingsView(
     onClearFirebaseConfig: () -> Unit,
     onSaveGitHubToken: (String) -> Unit,
     onClearGitHubToken: () -> Unit,
+    diagnosticsReport: ToddDiagnosticReport?,
+    diagnosticsBusy: Boolean,
+    onRunDiagnostics: () -> Unit,
     onAIModeChange: (AIProviderMode) -> Unit,
     onOpenAccessibility: () -> Unit,
     onOpenNotificationAccess: () -> Unit,
@@ -1200,6 +1216,57 @@ fun SettingsView(
             if (githubTokenConfigured) {
                 OutlinedButton(onClick = onClearGitHubToken) {
                     Text("مسح التفويض")
+                }
+            }
+        }
+        Spacer(modifier = Modifier.height(24.dp))
+        Text("فحص Todd الشامل", fontWeight = FontWeight.Bold, color = Color.White)
+        Text(
+            "يفحص الذاكرة والذكاء السحابي والمحلي وGitHub والصلاحيات ولوحة Todd ورؤية الشاشة.",
+            fontSize = 12.sp,
+            color = Color(0xFF94A3B8)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Button(
+            onClick = onRunDiagnostics,
+            enabled = !diagnosticsBusy
+        ) {
+            Icon(Icons.Default.FactCheck, contentDescription = null, modifier = Modifier.size(16.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(if (diagnosticsBusy) "جارٍ الفحص..." else "تشغيل الفحص الشامل")
+        }
+
+        diagnosticsReport?.let { report ->
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                "نجح: ${report.passCount} • تحذير: ${report.warnCount} • فشل: ${report.failCount}",
+                fontSize = 12.sp,
+                color = if (report.failCount == 0) Color(0xFF10B981) else Color(0xFFF87171)
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+
+            report.checks.forEach { check ->
+                val marker = when (check.status) {
+                    DiagnosticStatus.PASS -> "✓"
+                    DiagnosticStatus.WARN -> "!"
+                    DiagnosticStatus.FAIL -> "×"
+                }
+                val markerColor = when (check.status) {
+                    DiagnosticStatus.PASS -> Color(0xFF10B981)
+                    DiagnosticStatus.WARN -> Color(0xFFF59E0B)
+                    DiagnosticStatus.FAIL -> Color(0xFFEF4444)
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Text(marker, color = markerColor, fontWeight = FontWeight.Bold)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(check.title, color = Color.White, fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                        Text(check.detail, color = Color(0xFF94A3B8), fontSize = 11.sp)
+                    }
                 }
             }
         }
