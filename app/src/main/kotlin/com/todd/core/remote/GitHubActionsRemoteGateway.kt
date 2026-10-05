@@ -8,6 +8,26 @@ import java.net.HttpURLConnection
 import java.net.URLEncoder
 import java.net.URL
 
+internal fun extractWorkflowFailureExcerpt(log: String): String {
+    if (log.isBlank()) return ""
+
+    val lines = log.lineSequence().toList()
+    val important = lines.filter { line ->
+        val value = line.trim()
+        value.contains("FAILURE:", ignoreCase = true) ||
+            value.contains("error:", ignoreCase = true) ||
+            value.contains(" e: ", ignoreCase = true) ||
+            value.startsWith("e:", ignoreCase = true) ||
+            value.contains("Caused by:", ignoreCase = true) ||
+            value.contains("Exception", ignoreCase = true) ||
+            value.contains("Unresolved reference", ignoreCase = true) ||
+            value.contains("Execution failed for task", ignoreCase = true)
+    }
+
+    val selected = if (important.isNotEmpty()) important.takeLast(40) else lines.takeLast(60)
+    return selected.joinToString("\n").takeLast(8_000)
+}
+
 class GitHubActionsRemoteGateway(
     private val tokenProvider: () -> String?,
     private val controlRepository: String = "fateh1989/Todd",
@@ -72,9 +92,13 @@ class GitHubActionsRemoteGateway(
 
         var currentStep: String? = null
         var failureMessage: String? = null
+        var failedJobId: Long? = null
 
         for (i in 0 until jobs.length()) {
             val job = jobs.getJSONObject(i)
+            if (job.optString("conclusion") == "failure") {
+                failedJobId = job.optLong("id").takeIf { it > 0L }
+            }
             val steps = job.optJSONArray("steps") ?: continue
             for (s in 0 until steps.length()) {
                 val step = steps.getJSONObject(s)
@@ -86,6 +110,22 @@ class GitHubActionsRemoteGateway(
                 if (conclusion == "failure") {
                     failureMessage = "Failed step: ${step.optString("name")}"
                 }
+            }
+        }
+
+        failedJobId?.let { jobId ->
+            val logExcerpt = runCatching {
+                extractWorkflowFailureExcerpt(downloadJobLog(jobId, token))
+            }.getOrNull().orEmpty()
+
+            if (logExcerpt.isNotBlank()) {
+                failureMessage = buildString {
+                    failureMessage?.let {
+                        appendLine(it)
+                        appendLine()
+                    }
+                    append(logExcerpt)
+                }.takeLast(MAX_FAILURE_MESSAGE_CHARS)
             }
         }
 
@@ -147,6 +187,72 @@ class GitHubActionsRemoteGateway(
         }
         return null
     }
+
+    private suspend fun downloadJobLog(jobId: Long, token: String): String =
+        withContext(Dispatchers.IO) {
+            val apiConnection = (
+                URL(
+                    apiBaseUrl +
+                        "/repos/${repoPath(controlRepository)}/actions/jobs/$jobId/logs"
+                ).openConnection() as HttpURLConnection
+            ).apply {
+                requestMethod = "GET"
+                instanceFollowRedirects = false
+                connectTimeout = 15_000
+                readTimeout = 30_000
+                setRequestProperty("Accept", "application/vnd.github+json")
+                setRequestProperty("X-GitHub-Api-Version", "2022-11-28")
+                setRequestProperty("Authorization", "Bearer $token")
+                setRequestProperty("User-Agent", "Todd-Android")
+            }
+
+            val location = try {
+                val code = apiConnection.responseCode
+                if (code != HttpURLConnection.HTTP_MOVED_TEMP) {
+                    throw IllegalStateException(
+                        "GitHub job log request failed with HTTP $code"
+                    )
+                }
+                apiConnection.getHeaderField("Location")
+                    ?: throw IllegalStateException("GitHub job log redirect was missing.")
+            } finally {
+                apiConnection.disconnect()
+            }
+
+            val logConnection = (URL(location).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 15_000
+                readTimeout = 30_000
+                setRequestProperty("User-Agent", "Todd-Android")
+            }
+
+            try {
+                val code = logConnection.responseCode
+                if (code !in 200..299) {
+                    throw IllegalStateException(
+                        "GitHub job log download failed with HTTP $code"
+                    )
+                }
+                logConnection.inputStream
+                    .bufferedReader(Charsets.UTF_8)
+                    .use { reader ->
+                        val out = StringBuilder()
+                        val buffer = CharArray(8_192)
+                        while (out.length < MAX_JOB_LOG_CHARS) {
+                            val read = reader.read(
+                                buffer,
+                                0,
+                                minOf(buffer.size, MAX_JOB_LOG_CHARS - out.length)
+                            )
+                            if (read <= 0) break
+                            out.append(buffer, 0, read)
+                        }
+                        out.toString()
+                    }
+            } finally {
+                logConnection.disconnect()
+            }
+        }
 
     private fun requiredToken(): String =
         tokenProvider()?.trim()?.takeIf { it.isNotBlank() }
@@ -223,5 +329,10 @@ class GitHubActionsRemoteGateway(
         } finally {
             connection.disconnect()
         }
+    }
+
+    companion object {
+        private const val MAX_JOB_LOG_CHARS = 750_000
+        private const val MAX_FAILURE_MESSAGE_CHARS = 8_000
     }
 }
