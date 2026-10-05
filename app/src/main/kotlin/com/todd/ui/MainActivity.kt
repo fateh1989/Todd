@@ -347,7 +347,8 @@ fun ToddMainScreen(
                     onGeminiModelChange = { model ->
                         app.geminiModelPreferenceStore.set(model)
                         selectedGeminiModel = model
-                        cloudAIStatus = "تم اختيار ${model.displayName}"
+                        stateMachine.setAIMode(AIProviderMode.CLOUD_PREFERRED)
+                        cloudAIStatus = "تم اختيار ${model.displayName} للتشغيل السحابي"
                     },
                     onToggleVoice = {
                         if (liveState == GeminiLiveState.DISCONNECTED || liveState == GeminiLiveState.ERROR) {
@@ -719,7 +720,8 @@ fun ToddMainScreen(
                     onGeminiModelChange = { model ->
                         app.geminiModelPreferenceStore.set(model)
                         selectedGeminiModel = model
-                        cloudAIStatus = "تم اختيار ${model.displayName}"
+                        stateMachine.setAIMode(AIProviderMode.CLOUD_PREFERRED)
+                        cloudAIStatus = "تم اختيار ${model.displayName} للتشغيل السحابي"
                     },
                     onCheckCloudAI = {
                         scope.launch {
