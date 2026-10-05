@@ -32,6 +32,14 @@ android {
             "1.0.0"
         }
 
+        val gitSha = System.getenv("GITHUB_SHA") ?: "b52b056f5cba47e2c46df6dcec5eb77ccf08deee"
+        val runNumber = System.getenv("GITHUB_RUN_NUMBER") ?: ""
+        val buildTimestamp = java.time.ZonedDateTime.now(java.time.ZoneOffset.UTC).format(java.time.format.DateTimeFormatter.ISO_INSTANT)
+
+        buildConfigField("String", "GIT_COMMIT_SHA", "\"$gitSha\"")
+        buildConfigField("String", "GITHUB_RUN_NUMBER", "\"$runNumber\"")
+        buildConfigField("String", "BUILD_TIME", "\"$buildTimestamp\"")
+
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

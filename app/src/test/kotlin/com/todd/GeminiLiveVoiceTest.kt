@@ -19,7 +19,7 @@ class GeminiLiveVoiceTest {
             context = null,
             rulesEngine = RulesEngine(),
             repository = null,
-            liveModelName = "gemini-2.5-flash-native-audio-preview-12-2025",
+            liveModelName = "gemini-3.8-live",
             sessionStarter = { Result.success(Unit) },
             textResponder = { prompt -> Result.success("Todd reply: $prompt") }
         )

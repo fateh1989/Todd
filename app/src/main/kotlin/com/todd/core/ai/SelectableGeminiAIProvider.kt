@@ -32,7 +32,7 @@ class SelectableGeminiAIProvider(
 
     private fun selectedProvider(): AIProvider =
         when (selectionProvider()) {
-            GeminiCloudModel.FLASH_LITE_3_5 -> liteProvider
+            GeminiCloudModel.FLASH_LITE_3_1 -> liteProvider
             GeminiCloudModel.FLASH_3_8 -> strongProvider
         }
 }

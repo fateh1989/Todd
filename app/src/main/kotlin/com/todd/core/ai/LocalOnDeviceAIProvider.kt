@@ -18,7 +18,7 @@ import java.io.File
 
 @OptIn(PublicPreviewAPI::class)
 class LocalOnDeviceAIProvider(
-    private val modelName: String = "gemini-3.5-flash-lite"
+    private val modelName: String = "gemini-3.1-flash-lite"
 ) : AIProvider {
 
     override val type: ProviderType = ProviderType.LOCAL_ON_DEVICE

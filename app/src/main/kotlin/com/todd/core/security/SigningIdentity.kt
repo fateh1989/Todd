@@ -34,4 +34,7 @@ object SigningIdentity {
             .digest(certificate.toByteArray())
             .joinToString("") { "%02x".format(it) }
     }
+
+    fun isStableSigned(context: Context): Boolean =
+        currentSha256(context)?.equals(EXPECTED_STABLE_SHA256, ignoreCase = true) == true
 }

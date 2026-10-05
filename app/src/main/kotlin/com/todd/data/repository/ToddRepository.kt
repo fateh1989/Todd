@@ -58,6 +58,7 @@ class ToddRepository(private val database: ToddDatabase) {
         val latestTask = database.taskDao().getLatestTaskForProject(projectId)
         val memories = database.memoryDao().getRecentMemories(projectId, memoryLimit)
         val failures = database.failureDao().getRecentFailures(projectId, failureLimit)
+        val rules = runCatching { database.ruleDao().getActiveRulesForProject(projectId) }.getOrDefault(emptyList())
 
         return buildString {
             appendLine("Todd persistent project context")
@@ -65,7 +66,7 @@ class ToddRepository(private val database: ToddDatabase) {
             if (project != null) {
                 appendLine("Project: ${project.name}")
                 project.repository?.let { appendLine("Repository: $it") }
-                appendLine("Branch: ${project.branch}")
+                project.branch.let { appendLine("Branch: $it") }
                 project.lastVerifiedCommit?.let { appendLine("Last verified commit: $it") }
                 if (project.currentGoal.isNotBlank()) appendLine("Current goal: ${project.currentGoal}")
             } else {
@@ -98,6 +99,16 @@ class ToddRepository(private val database: ToddDatabase) {
                     append("- ${failure.operation}: ${failure.errorMessage}")
                     if (failure.confirmedCause != null) append(" | cause=${failure.confirmedCause}")
                     append(" | retry when=${failure.retryCondition}")
+                    appendLine()
+                }
+            }
+
+            if (rules.isNotEmpty()) {
+                appendLine()
+                appendLine("Active rules and tool permissions:")
+                rules.forEach { rule ->
+                    append("- [${rule.category}] ${rule.behavior}")
+                    if (rule.explanation.isNotBlank()) append(": ${rule.explanation}")
                     appendLine()
                 }
             }

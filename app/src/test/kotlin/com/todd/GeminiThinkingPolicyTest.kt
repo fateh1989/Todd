@@ -10,7 +10,7 @@ class GeminiThinkingPolicyTest {
     fun `flash lite uses minimal thinking for frequent work`() {
         assertEquals(
             "minimal",
-            thinkingLevelForGeminiModel("gemini-3.5-flash-lite")
+            thinkingLevelForGeminiModel("gemini-3.1-flash-lite")
         )
     }
 

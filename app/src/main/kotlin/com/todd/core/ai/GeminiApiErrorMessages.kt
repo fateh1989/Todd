@@ -8,7 +8,7 @@ object GeminiApiErrorMessages {
         modelName: String
     ): String {
         val modelLabel = when (modelName) {
-            "gemini-3.5-flash-lite" -> "Gemini 3.5 Flash-Lite"
+            "gemini-3.1-flash-lite" -> "Gemini 3.1 Flash-Lite"
             "gemini-3.8-flash" -> "Gemini 3.8 Flash"
             else -> modelName
         }

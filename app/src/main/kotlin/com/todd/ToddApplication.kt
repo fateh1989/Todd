@@ -199,7 +199,7 @@ class ToddApplication : Application() {
             }
         )
         // Local provider: real Gemini on-device inference; LOCAL_ONLY never falls back to cloud.
-        val localProvider = LocalOnDeviceAIProvider(modelName = "gemini-3.5-flash-lite")
+        val localProvider = LocalOnDeviceAIProvider(modelName = "gemini-3.1-flash-lite")
 
         // Primary cloud text provider: direct Gemini Developer API.
         // The owner enters one Gemini API key in Settings; it is encrypted with Android Keystore.
@@ -207,7 +207,7 @@ class ToddApplication : Application() {
         // when Firebase is unavailable on the physical device.
         val geminiLiteProvider = DirectGeminiAIProvider(
             apiKeyProvider = { geminiApiKeyStore.getKey() },
-            modelName = "gemini-3.5-flash-lite",
+            modelName = "gemini-3.1-flash-lite",
             requestObserver = geminiUsageTracker::recordRequest
         )
         val geminiStrongProvider = DirectGeminiAIProvider(

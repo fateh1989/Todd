@@ -50,6 +50,8 @@ import com.todd.core.remote.RemoteJobRequest
 import com.todd.core.agent.AutonomousCodingRequest
 import com.todd.core.diagnostics.ToddDiagnosticReport
 import com.todd.core.diagnostics.DiagnosticStatus
+import com.todd.BuildConfig
+import com.todd.core.security.SigningIdentity
 import com.todd.service.overlay.FloatingToddService
 import com.todd.service.accessibility.ToddAccessibilityService
 import com.todd.service.screen.ScreenCaptureService
@@ -88,6 +90,7 @@ class MainActivity : ComponentActivity() {
                 notificationAccessEnabled = NotificationManagerCompat
                     .getEnabledListenerPackages(this)
                     .contains(packageName),
+                overlayEnabled = Build.VERSION.SDK_INT < Build.VERSION_CODES.M || Settings.canDrawOverlays(this),
                 onStartOverlay = { checkOverlayPermissionAndStart() },
                 onOpenAccessibility = {
                     startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
@@ -179,6 +182,7 @@ class MainActivity : ComponentActivity() {
 fun ToddMainScreen(
     accessibilityEnabled: Boolean,
     notificationAccessEnabled: Boolean,
+    overlayEnabled: Boolean = false,
     onStartOverlay: () -> Unit,
     onOpenAccessibility: () -> Unit,
     onOpenNotificationAccess: () -> Unit,
@@ -742,6 +746,8 @@ fun ToddMainScreen(
                     onAIModeChange = { mode -> stateMachine.setAIMode(mode) },
                     onOpenAccessibility = onOpenAccessibility,
                     onOpenNotificationAccess = onOpenNotificationAccess,
+                    overlayEnabled = overlayEnabled,
+                    onStartOverlay = onStartOverlay,
                     onStartVisualScreen = onStartVisualScreen,
                     onStopVisualScreen = onStopVisualScreen
                 )
@@ -852,9 +858,9 @@ fun HomeDashboard(
         Spacer(modifier = Modifier.height(6.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(
-                selected = selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_5,
-                onClick = { onGeminiModelChange(GeminiCloudModel.FLASH_LITE_3_5) },
-                label = { Text("3.5 خفيف") }
+                selected = selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_1,
+                onClick = { onGeminiModelChange(GeminiCloudModel.FLASH_LITE_3_1) },
+                label = { Text("3.1 خفيف") }
             )
             FilterChip(
                 selected = selectedGeminiModel == GeminiCloudModel.FLASH_3_8,
@@ -863,7 +869,7 @@ fun HomeDashboard(
             )
         }
         Text(
-            if (selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_5) {
+            if (selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_1) {
                 "للعمل اليومي والطلبات الكثيرة"
             } else {
                 "للبرمجة والمهام الصعبة"
@@ -1410,6 +1416,8 @@ fun SettingsView(
     onAIModeChange: (AIProviderMode) -> Unit,
     onOpenAccessibility: () -> Unit,
     onOpenNotificationAccess: () -> Unit,
+    overlayEnabled: Boolean = false,
+    onStartOverlay: () -> Unit = {},
     onStartVisualScreen: () -> Unit,
     onStopVisualScreen: () -> Unit
 ) {
@@ -1473,9 +1481,9 @@ fun SettingsView(
         Spacer(modifier = Modifier.height(6.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(
-                selected = selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_5,
-                onClick = { onGeminiModelChange(GeminiCloudModel.FLASH_LITE_3_5) },
-                label = { Text("3.5 Flash-Lite") }
+                selected = selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_1,
+                onClick = { onGeminiModelChange(GeminiCloudModel.FLASH_LITE_3_1) },
+                label = { Text("3.1 Flash-Lite") }
             )
             FilterChip(
                 selected = selectedGeminiModel == GeminiCloudModel.FLASH_3_8,
@@ -1484,7 +1492,7 @@ fun SettingsView(
             )
         }
         Text(
-            if (selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_5) {
+            if (selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_1) {
                 "للعمل اليومي والطلبات الكثيرة."
             } else {
                 "للبرمجة والمهام الصعبة."
@@ -1792,39 +1800,62 @@ fun SettingsView(
         )
 
         Spacer(modifier = Modifier.height(20.dp))
-        Text("فهم الشاشة", fontWeight = FontWeight.Bold, color = Color.White)
+        Text("الصلاحيات وفهم السياق", fontWeight = FontWeight.Bold, color = Color.White)
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             if (accessibilityEnabled) {
-                "فهم الشاشة عبر إمكانية الوصول: مفعّل."
+                "✓ فهم عناصر الشاشة عبر إمكانية الوصول: مفعّل ومتاح."
             } else {
-                "فهم الشاشة عبر إمكانية الوصول: غير مفعّل."
+                "فهم عناصر الشاشة عبر إمكانية الوصول: غير مفعّل."
             },
             fontSize = 12.sp,
             color = if (accessibilityEnabled) Color(0xFF10B981) else Color(0xFFF59E0B)
         )
-        Spacer(modifier = Modifier.height(8.dp))
-        Button(onClick = onOpenAccessibility) {
-            Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("فتح إعدادات فهم الشاشة")
+        if (!accessibilityEnabled) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Button(onClick = onOpenAccessibility) {
+                Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("تفعيل فهم عناصر الشاشة")
+            }
         }
 
         Spacer(modifier = Modifier.height(8.dp))
         Text(
             if (notificationAccessEnabled) {
-                "وصول الإشعارات: مفعّل."
+                "✓ وصول الإشعارات: مفعّل ومتاح."
             } else {
                 "وصول الإشعارات: غير مفعّل."
             },
             fontSize = 12.sp,
             color = if (notificationAccessEnabled) Color(0xFF10B981) else Color(0xFFF59E0B)
         )
-        Spacer(modifier = Modifier.height(6.dp))
-        OutlinedButton(onClick = onOpenNotificationAccess) {
-            Icon(Icons.Default.Notifications, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(6.dp))
-            Text("فتح وصول الإشعارات")
+        if (!notificationAccessEnabled) {
+            Spacer(modifier = Modifier.height(6.dp))
+            OutlinedButton(onClick = onOpenNotificationAccess) {
+                Icon(Icons.Default.Notifications, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("تفعيل وصول الإشعارات")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            if (overlayEnabled) {
+                "✓ الزر العائم فوق التطبيقات: مفعّل ومتاح."
+            } else {
+                "الزر العائم فوق التطبيقات: غير مفعّل."
+            },
+            fontSize = 12.sp,
+            color = if (overlayEnabled) Color(0xFF10B981) else Color(0xFFF59E0B)
+        )
+        if (!overlayEnabled) {
+            Spacer(modifier = Modifier.height(6.dp))
+            OutlinedButton(onClick = onStartOverlay) {
+                Icon(Icons.Default.Layers, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("تفعيل الزر العائم")
+            }
         }
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -1894,6 +1925,38 @@ fun SettingsView(
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(24.dp))
+        Text("بيانات الإصدار والبناء", fontWeight = FontWeight.Bold, color = Color.White)
+        Text(
+            "معلومات دقيقة للقراءة فقط عن النسخة المثبتة حالياً للتحقق من هوية Build وتجنب الخلط بين الإصدارات.",
+            fontSize = 12.sp,
+            color = Color(0xFF94A3B8)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Card(
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+            shape = RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                val currentSha = SigningIdentity.currentSha256(context) ?: "غير متوفرة"
+                val isStable = SigningIdentity.isStableSigned(context)
+                val runNum = BuildConfig.GITHUB_RUN_NUMBER.ifBlank { "بناء محلي / غير محدد" }
+
+                BuildInfoRow("إصدار التطبيق (Version):", "${BuildConfig.VERSION_NAME} (كود: ${BuildConfig.VERSION_CODE})")
+                BuildInfoRow("Git Commit SHA:", BuildConfig.GIT_COMMIT_SHA)
+                BuildInfoRow("رقم GitHub Actions Run:", runNum)
+                BuildInfoRow("تاريخ ووقت البناء:", BuildConfig.BUILD_TIME)
+                BuildInfoRow(
+                    "نوع التوقيع الحالي:",
+                    if (isStable) "توقيع Todd الدائم (مؤكد ومستقر)" else "توقيع Debug / غير رسمي",
+                    valueColor = if (isStable) Color(0xFF10B981) else Color(0xFFF59E0B)
+                )
+                BuildInfoRow("بصمة شهادة التوقيع (SHA-256):", currentSha)
+            }
+        }
+
         Spacer(modifier = Modifier.height(24.dp))
         Text("فحص Todd الشامل", fontWeight = FontWeight.Bold, color = Color.White)
         Text(
@@ -1980,5 +2043,13 @@ fun SettingsView(
                 }
             }
         )
+    }
+}
+
+@Composable
+private fun BuildInfoRow(label: String, value: String, valueColor: Color = Color.White) {
+    Column(modifier = Modifier.padding(vertical = 4.dp)) {
+        Text(label, fontSize = 11.sp, color = Color(0xFF94A3B8), fontWeight = FontWeight.SemiBold)
+        Text(value, fontSize = 12.sp, color = valueColor)
     }
 }

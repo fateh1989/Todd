@@ -27,6 +27,7 @@ import androidx.core.content.ContextCompat
 import com.todd.ToddApplication
 import com.todd.core.ai.GeminiLiveState
 import com.todd.core.ai.AIRequest
+import com.todd.core.model.ToddGlobalStatus
 import com.todd.service.context.DeviceContextProvider
 import com.todd.service.screen.ScreenCaptureStore
 import kotlinx.coroutines.CoroutineScope
@@ -41,6 +42,9 @@ class FloatingToddService : Service() {
     private var overlayView: View? = null
     private var overlayParams: WindowManager.LayoutParams? = null
     private var panelView: View? = null
+    private var dropTargetView: View? = null
+    private var hideTargetBox: TextView? = null
+    private var powerTargetBox: TextView? = null
 
     private var initialX = 0
     private var initialY = 0
@@ -133,6 +137,7 @@ class FloatingToddService : Service() {
             }
             elevation = dp(8).toFloat()
         }
+        observeToddState(button)
         container.addView(
             button,
             FrameLayout.LayoutParams(
@@ -161,6 +166,7 @@ class FloatingToddService : Service() {
                     if (kotlin.math.abs(dx) > 10 || kotlin.math.abs(dy) > 10) {
                         isDragging = true
                         closeCompactPanel()
+                        showDropTargets()
                     }
 
                     if (isDragging) {
@@ -172,21 +178,33 @@ class FloatingToddService : Service() {
                         val screenWidth = resources.displayMetrics.widthPixels
                         val inBottomTargetArea = event.rawY > screenHeight - dp(150)
 
-                        if (inBottomTargetArea && event.rawX >= screenWidth / 2f) {
-                            if (dwellStartTime == 0L) {
-                                dwellStartTime = System.currentTimeMillis()
-                            } else if (System.currentTimeMillis() - dwellStartTime >= POWER_DWELL_MS) {
-                                ToddApplication.instance.stateMachine.powerOff()
-                                stopSelf()
+                        if (inBottomTargetArea) {
+                            if (event.rawX >= screenWidth / 2f) {
+                                highlightPowerTarget(true)
+                                highlightHideTarget(false)
+                                if (dwellStartTime == 0L) {
+                                    dwellStartTime = System.currentTimeMillis()
+                                } else if (System.currentTimeMillis() - dwellStartTime >= POWER_DWELL_MS) {
+                                    hideDropTargets()
+                                    ToddApplication.instance.stateMachine.powerOff()
+                                    stopSelf()
+                                }
+                            } else {
+                                dwellStartTime = 0L
+                                highlightHideTarget(true)
+                                highlightPowerTarget(false)
                             }
                         } else {
                             dwellStartTime = 0L
+                            highlightHideTarget(false)
+                            highlightPowerTarget(false)
                         }
                     }
                     true
                 }
 
                 MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    hideDropTargets()
                     if (!isDragging && event.actionMasked == MotionEvent.ACTION_UP) {
                         toggleCompactPanel()
                     } else if (isDragging) {
@@ -528,7 +546,119 @@ class FloatingToddService : Service() {
         }
     }
 
+    private fun showDropTargets() {
+        if (dropTargetView != null) return
+        val targetParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.MATCH_PARENT,
+            dp(120),
+            overlayType(),
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.BOTTOM
+        }
+
+        val bar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            setBackgroundColor(Color.argb(220, 15, 23, 42))
+            setPadding(dp(12), dp(8), dp(12), dp(16))
+        }
+
+        val hide = TextView(this).apply {
+            text = "إخفاء الزر فقط\n(Hide)"
+            gravity = Gravity.CENTER
+            textSize = 13f
+            setTextColor(Color.WHITE)
+            background = GradientDrawable().apply {
+                setColor(Color.argb(180, 51, 65, 85))
+                cornerRadius = dp(12).toFloat()
+                setStroke(dp(2), Color.argb(150, 148, 163, 184))
+            }
+        }
+        hideTargetBox = hide
+        bar.addView(hide, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
+            setMargins(dp(4), dp(4), dp(4), dp(4))
+        })
+
+        val power = TextView(this).apply {
+            text = "إيقاف Todd بأمان\n(استمر بالضغط)"
+            gravity = Gravity.CENTER
+            textSize = 13f
+            setTextColor(Color.WHITE)
+            background = GradientDrawable().apply {
+                setColor(Color.argb(180, 185, 28, 28))
+                cornerRadius = dp(12).toFloat()
+                setStroke(dp(2), Color.argb(180, 239, 68, 68))
+            }
+        }
+        powerTargetBox = power
+        bar.addView(power, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.MATCH_PARENT, 1f).apply {
+            setMargins(dp(4), dp(4), dp(4), dp(4))
+        })
+
+        runCatching {
+            windowManager.addView(bar, targetParams)
+            dropTargetView = bar
+        }
+    }
+
+    private fun highlightHideTarget(active: Boolean) {
+        hideTargetBox?.background = GradientDrawable().apply {
+            setColor(if (active) Color.argb(240, 71, 85, 105) else Color.argb(180, 51, 65, 85))
+            cornerRadius = dp(12).toFloat()
+            setStroke(if (active) dp(3) else dp(2), if (active) Color.WHITE else Color.argb(150, 148, 163, 184))
+        }
+    }
+
+    private fun highlightPowerTarget(active: Boolean) {
+        powerTargetBox?.background = GradientDrawable().apply {
+            setColor(if (active) Color.argb(240, 220, 38, 38) else Color.argb(180, 185, 28, 28))
+            cornerRadius = dp(12).toFloat()
+            setStroke(if (active) dp(3) else dp(2), if (active) Color.YELLOW else Color.argb(180, 239, 68, 68))
+        }
+    }
+
+    private fun hideDropTargets() {
+        dropTargetView?.let { view ->
+            runCatching { windowManager.removeView(view) }
+        }
+        dropTargetView = null
+        hideTargetBox = null
+        powerTargetBox = null
+    }
+
+    private fun observeToddState(button: TextView) {
+        serviceScope.launch {
+            val app = ToddApplication.instance
+            app.stateMachine.state.collect { state ->
+                updateButtonAppearance(button, state.globalStatus)
+            }
+        }
+    }
+
+    private fun updateButtonAppearance(button: TextView, status: ToddGlobalStatus) {
+        val (bgColor, strokeColor, label) = when (status) {
+            ToddGlobalStatus.LISTENING -> Triple(Color.rgb(16, 185, 129), Color.WHITE, "🎤")
+            ToddGlobalStatus.THINKING -> Triple(Color.rgb(139, 92, 246), Color.WHITE, "🧠")
+            ToddGlobalStatus.WORKING -> Triple(Color.rgb(245, 158, 11), Color.WHITE, "⚙")
+            ToddGlobalStatus.WAITING -> Triple(Color.rgb(59, 130, 246), Color.WHITE, "⏳")
+            ToddGlobalStatus.LOCAL_ONLY -> Triple(Color.rgb(6, 182, 212), Color.WHITE, "L")
+            ToddGlobalStatus.CLOUD_ACTIVE -> Triple(Color.rgb(14, 165, 233), Color.WHITE, "C")
+            ToddGlobalStatus.PAUSED -> Triple(Color.rgb(100, 116, 139), Color.LTGRAY, "⏸")
+            ToddGlobalStatus.ERROR -> Triple(Color.rgb(239, 68, 68), Color.WHITE, "!")
+            ToddGlobalStatus.OFF -> Triple(Color.rgb(30, 41, 59), Color.GRAY, "✕")
+            ToddGlobalStatus.IDLE -> Triple(Color.rgb(79, 70, 229), Color.WHITE, "T")
+        }
+        button.text = label
+        button.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(bgColor)
+            setStroke(dp(2), strokeColor)
+        }
+    }
+
     override fun onDestroy() {
+        hideDropTargets()
         closeCompactPanel()
         overlayView?.let {
             runCatching { windowManager.removeView(it) }

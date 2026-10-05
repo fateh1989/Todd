@@ -122,6 +122,9 @@ interface RuleDao {
     @Query("SELECT * FROM rules WHERE isEnabled = 1")
     fun getActiveRules(): Flow<List<Rule>>
 
+    @Query("SELECT * FROM rules WHERE isEnabled = 1 AND (projectId = :projectId OR projectId IS NULL OR scope = 'GLOBAL')")
+    suspend fun getActiveRulesForProject(projectId: String): List<Rule>
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertRule(rule: Rule)
 }
