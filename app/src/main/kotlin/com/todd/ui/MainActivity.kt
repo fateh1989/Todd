@@ -591,7 +591,7 @@ fun ToddMainScreen(
                                         prompt = "Reply with exactly: TODD_CLOUD_OK",
                                         systemPrompt = "This is a Todd connectivity self-test. Do not add anything else.",
                                         temperature = 0.0f,
-                                        maxTokens = 32
+                                        maxTokens = 512
                                     )
                                 ).fold(
                                     onSuccess = { response ->

@@ -90,8 +90,14 @@ class DirectGeminiAIProvider(
                     .put(
                         "generationConfig",
                         JSONObject()
-                            .put("temperature", request.temperature.toDouble())
-                            .put("maxOutputTokens", request.maxTokens)
+                            // Gemini 3.8 Flash thinks by default. A tiny output cap can be
+                            // consumed entirely by thinking and produce HTTP 200 with no text.
+                            // Keep the output budget usable and request LOW thinking for fast chat.
+                            .put("maxOutputTokens", maxOf(request.maxTokens, 512))
+                            .put(
+                                "thinkingConfig",
+                                JSONObject().put("thinkingLevel", "low")
+                            )
                     )
 
                 val endpoint =
@@ -138,10 +144,21 @@ class DirectGeminiAIProvider(
                         throw IllegalStateException("Gemini returned an empty candidate list.")
                     }
 
-                    val content = candidates.getJSONObject(0).optJSONObject("content")
-                        ?: throw IllegalStateException("Gemini returned no content.")
+                    val firstCandidate = candidates.getJSONObject(0)
+                    val finishReason = firstCandidate.optString("finishReason", "UNKNOWN")
+                    val usage = root.optJSONObject("usageMetadata")
+                    val thoughts = usage?.optInt("thoughtsTokenCount", 0) ?: 0
+                    val candidateTokens = usage?.optInt("candidatesTokenCount", 0) ?: 0
+                    val content = firstCandidate.optJSONObject("content")
+                        ?: throw IllegalStateException(
+                            "Gemini returned no content (finishReason=$finishReason, " +
+                                "thoughts=$thoughts, output=$candidateTokens)."
+                        )
                     val responseParts = content.optJSONArray("parts")
-                        ?: throw IllegalStateException("Gemini returned no response parts.")
+                        ?: throw IllegalStateException(
+                            "Gemini returned no response parts (finishReason=$finishReason, " +
+                                "thoughts=$thoughts, output=$candidateTokens)."
+                        )
 
                     val text = buildString {
                         for (i in 0 until responseParts.length()) {
@@ -157,7 +174,6 @@ class DirectGeminiAIProvider(
                         throw IllegalStateException("Gemini returned empty text.")
                     }
 
-                    val usage = root.optJSONObject("usageMetadata")
                     val tokens = usage?.optInt("totalTokenCount", 0) ?: 0
 
                     val sources = mutableListOf<AISource>()
