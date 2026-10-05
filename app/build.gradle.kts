@@ -57,6 +57,7 @@ android {
         }
         release {
             isMinifyEnabled = false
+            toddStableSigningConfig?.let { signingConfig = it }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

@@ -61,7 +61,8 @@ Not yet physically verified from newer code:
 - Chat composer uses IME padding and MainActivity uses adjustResize.
 
 ## Current limitations
-- Stable update signing is not configured yet. Do not distribute the next long-term install baseline until one permanent signing identity is configured and verified.
+- A permanent Todd signing identity has now been generated outside the repository and its public certificate fingerprint is pinned in code/workflow. The private keystore is NOT committed. GitHub Actions secrets still need to be configured before the first stable release APK can be produced and verified.
+- Expected permanent signer SHA-256: `2354bcf2cbc13c549948898626cbc45509382b6f9b9e246d76355cce4d9e0d92`.
 - Gemini Live voice is not physically verified and still needs real runtime configuration.
 - The owner's physical device reported the on-device model unavailable; local AI is not verified.
 - Direct search/tool behavior is not physically verified yet.

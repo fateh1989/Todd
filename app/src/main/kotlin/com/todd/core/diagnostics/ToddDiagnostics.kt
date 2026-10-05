@@ -11,6 +11,7 @@ import androidx.core.content.ContextCompat
 import com.todd.core.ai.AIRouter
 import com.todd.core.ai.AIRequest
 import com.todd.core.ai.FirebaseRuntimeConfig
+import com.todd.core.security.SigningIdentity
 import com.todd.core.tools.GitHubCredentialStore
 import com.todd.core.tools.GitHubTool
 import com.todd.data.repository.ToddRepository
@@ -49,6 +50,19 @@ class ToddDiagnostics(
 
     suspend fun run(): ToddDiagnosticReport {
         val checks = mutableListOf<DiagnosticCheck>()
+
+        val signer = SigningIdentity.currentSha256(context)
+        val stableSigner = signer.equals(SigningIdentity.EXPECTED_STABLE_SHA256, ignoreCase = true)
+        checks += DiagnosticCheck(
+            id = "stable-signing",
+            title = "توقيع التحديث الدائم",
+            status = if (stableSigner) DiagnosticStatus.PASS else DiagnosticStatus.WARN,
+            detail = if (stableSigner) {
+                "هذه النسخة موقعة بهوية Todd الدائمة؛ التحديثات اللاحقة يمكنها التثبيت فوقها."
+            } else {
+                "هذه النسخة ليست موقعة بعد بهوية Todd الدائمة. لا تعتمدها كنسخة التحديث النهائية."
+            }
+        )
 
         val project = runCatching { repository.getProjectById("todd-main") }.getOrNull()
         checks += DiagnosticCheck(
