@@ -12,6 +12,8 @@ class ToddRepository(private val database: ToddDatabase) {
 
     fun getAllTasks(): Flow<List<Task>> = database.taskDao().getAllTasks()
     suspend fun getTaskById(id: String): Task? = database.taskDao().getTaskById(id)
+    suspend fun getLatestTaskForProject(projectId: String): Task? =
+        database.taskDao().getLatestTaskForProject(projectId)
     fun getTasksByStatus(status: TaskStatus): Flow<List<Task>> =
         database.taskDao().getTasksByStatus(status)
     suspend fun saveTask(task: Task) = database.taskDao().insertTask(task)

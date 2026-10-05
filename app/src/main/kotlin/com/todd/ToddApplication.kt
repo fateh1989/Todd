@@ -195,6 +195,7 @@ class ToddApplication : Application() {
             githubTool = githubTool,
             remoteExecutor = remoteExecutor,
             autonomousTaskCoordinator = autonomousTaskCoordinator,
+            repository = repository,
             stateMachine = stateMachine,
             rulesEngine = rulesEngine
         )

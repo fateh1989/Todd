@@ -23,6 +23,7 @@ import com.todd.core.rules.ActionRequest
 import com.todd.core.rules.RulesEngine
 import com.todd.core.state.ToddStateMachine
 import com.todd.core.tools.GitHubTool
+import com.todd.data.repository.ToddRepository
 import com.todd.service.context.DeviceContextProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -44,6 +45,7 @@ class ToddTextAgent(
     private val githubTool: GitHubTool,
     private val remoteExecutor: RemoteExecutor,
     private val autonomousTaskCoordinator: AutonomousTaskCoordinator,
+    private val repository: ToddRepository,
     private val stateMachine: ToddStateMachine,
     private val rulesEngine: RulesEngine,
     private val modelName: String = "gemini-3.8-flash"
@@ -216,6 +218,20 @@ class ToddTextAgent(
             )
         ),
         FunctionDeclaration(
+            "checkTaskStatus",
+            "Read the durable Todd task state, current step, failure, and verification evidence for a task ID.",
+            mapOf(
+                "taskId" to Schema.string("Todd task ID returned when a task was started.")
+            )
+        ),
+        FunctionDeclaration(
+            "checkLatestTask",
+            "Read the newest durable task for the current or specified Todd project. Use this when the user asks where Todd reached or what it is doing.",
+            mapOf(
+                "projectId" to Schema.string("Todd project ID. Leave blank to use the active project.")
+            )
+        ),
+        FunctionDeclaration(
             "checkRemoteJob",
             "Reconnect to a Todd remote verification job and return its live status and evidence.",
             mapOf(
@@ -321,6 +337,44 @@ class ToddTextAgent(
                 }
             }
 
+            "checkTaskStatus" -> {
+                val taskId = arg(call, "taskId")
+                if (taskId.isBlank()) {
+                    buildJsonObject {
+                        put("ok", false)
+                        put("error", "taskId is required.")
+                    }
+                } else {
+                    val task = repository.getTaskById(taskId)
+                    if (task == null) {
+                        buildJsonObject {
+                            put("ok", false)
+                            put("taskId", taskId)
+                            put("error", "Todd task was not found.")
+                        }
+                    } else {
+                        taskJson(task)
+                    }
+                }
+            }
+
+            "checkLatestTask" -> {
+                val requestedProjectId = arg(call, "projectId")
+                val projectId = requestedProjectId.ifBlank {
+                    stateMachine.state.value.activeProjectId ?: "todd-main"
+                }
+                val task = repository.getLatestTaskForProject(projectId)
+                if (task == null) {
+                    buildJsonObject {
+                        put("ok", true)
+                        put("found", false)
+                        put("projectId", projectId)
+                    }
+                } else {
+                    taskJson(task)
+                }
+            }
+
             "checkRemoteJob" -> {
                 val jobId = arg(call, "jobId")
                 if (jobId.isBlank()) {
@@ -375,6 +429,21 @@ class ToddTextAgent(
         }
 
         return FunctionResponsePart(call.name, response, call.id)
+    }
+
+    private fun taskJson(task: com.todd.core.model.Task): JsonObject = buildJsonObject {
+        put("ok", true)
+        put("found", true)
+        put("taskId", task.id)
+        put("projectId", task.projectId)
+        put("title", task.title)
+        put("goal", task.goal)
+        put("status", task.status.name)
+        put("currentStep", task.currentStep)
+        put("completionCriteria", task.completionCriteria)
+        put("evidence", task.lastEvidence ?: "")
+        put("failure", task.failureCause ?: "")
+        put("updatedAt", task.updatedAt)
     }
 
     private fun arg(call: FunctionCallPart, name: String): String =
