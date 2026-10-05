@@ -517,7 +517,10 @@ fun ToddMainScreen(
                             localAIBusy = false
                         }
                     },
-                    onSaveGitHubToken = { token -> app.githubCredentialStore.saveToken(token) },
+                    onSaveGitHubToken = { token ->
+                        app.githubCredentialStore.saveToken(token)
+                        app.autonomousTaskCoordinator.resumePending()
+                    },
                     onClearGitHubToken = { app.githubCredentialStore.clearToken() },
                     onAIModeChange = { mode -> stateMachine.setAIMode(mode) },
                     onOpenAccessibility = onOpenAccessibility,

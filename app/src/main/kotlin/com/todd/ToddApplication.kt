@@ -20,6 +20,8 @@ import com.todd.core.remote.RemoteExecutor
 import com.todd.core.remote.RemoteJobStatus
 import com.todd.core.agent.AutonomousCodingLoop
 import com.todd.core.agent.AutonomousTaskCoordinator
+import com.todd.core.agent.AndroidAutonomousCheckpointStore
+import com.todd.core.agent.AutonomousCheckpointStore
 import com.todd.core.model.Project
 import com.todd.core.model.TaskStatus
 import kotlinx.coroutines.CoroutineScope
@@ -67,6 +69,9 @@ class ToddApplication : Application() {
     lateinit var autonomousTaskCoordinator: AutonomousTaskCoordinator
         private set
 
+    lateinit var autonomousCheckpointStore: AutonomousCheckpointStore
+        private set
+
     override fun onCreate() {
         super.onCreate()
         instance = this
@@ -77,6 +82,7 @@ class ToddApplication : Application() {
         stateMachine = ToddStateMachine(repository)
         githubCredentialStore = GitHubCredentialStore(this)
         githubTool = GitHubRestTool(tokenProvider = { githubCredentialStore.getToken() })
+        autonomousCheckpointStore = AndroidAutonomousCheckpointStore(this)
         rulesEngine = RulesEngine()
         remoteExecutor = GitHubActionsRemoteExecutor(
             gateway = GitHubActionsRemoteGateway(
@@ -151,13 +157,15 @@ class ToddApplication : Application() {
         autonomousCodingLoop = AutonomousCodingLoop(
             aiProvider = geminiProvider,
             githubTool = githubTool,
-            remoteExecutor = remoteExecutor
+            remoteExecutor = remoteExecutor,
+            checkpointStore = autonomousCheckpointStore
         )
         autonomousTaskCoordinator = AutonomousTaskCoordinator(
             repository = repository,
             stateMachine = stateMachine,
             githubCredentialStore = githubCredentialStore,
             codingLoop = autonomousCodingLoop,
+            checkpointStore = autonomousCheckpointStore,
             scope = appScope
         )
 
@@ -179,6 +187,7 @@ class ToddApplication : Application() {
                     )
                 )
             }
+            autonomousTaskCoordinator.resumePending()
         }
     }
 

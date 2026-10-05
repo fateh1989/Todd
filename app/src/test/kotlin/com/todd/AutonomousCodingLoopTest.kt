@@ -2,6 +2,9 @@ package com.todd
 
 import com.todd.core.agent.AutonomousCodingLoop
 import com.todd.core.agent.AutonomousCodingRequest
+import com.todd.core.agent.AutonomousCheckpoint
+import com.todd.core.agent.AutonomousCheckpointPhase
+import com.todd.core.agent.InMemoryAutonomousCheckpointStore
 import com.todd.core.ai.AIProvider
 import com.todd.core.ai.AIRequest
 import com.todd.core.ai.AIResponse
@@ -62,6 +65,52 @@ class AutonomousCodingLoopTest {
         assertEquals("commit-1", result.finalCommitSha)
         assertEquals("package com.todd\nclass Example { fun ok() = true }", git.lastFiles.values.single())
         assertEquals("commit-1", remote.lastRequest?.startCommit)
+    }
+
+    @Test
+    fun `resumes verification checkpoint without generating another commit`() = runBlocking {
+        val request = AutonomousCodingRequest(
+            taskId = "task-resume",
+            projectId = "todd-main",
+            repository = "fateh1989/Todd",
+            branch = "main",
+            objective = "Resume the previous coding job",
+            completionCriteria = "Remote verification succeeds",
+            maxIterations = 4
+        )
+        val checkpoints = InMemoryAutonomousCheckpointStore()
+        checkpoints.save(
+            AutonomousCheckpoint(
+                request = request,
+                iteration = 2,
+                headSha = "commit-2",
+                commitShas = listOf("commit-1", "commit-2"),
+                phase = AutonomousCheckpointPhase.VERIFYING,
+                verifyJobId = "task-resume-verify-2",
+                committedSha = "commit-2",
+                changedPaths = listOf("app/src/main/kotlin/com/todd/Example.kt")
+            )
+        )
+
+        val git = FakeGitHubTool()
+        val remote = CompletedRemoteExecutor()
+        val loop = AutonomousCodingLoop(
+            aiProvider = ScriptedProvider(ArrayDeque()),
+            githubTool = git,
+            remoteExecutor = remote,
+            checkpointStore = checkpoints,
+            pollIntervalMs = 0L,
+            maxPollsPerIteration = 2
+        )
+
+        val result = loop.run(request).getOrThrow()
+
+        assertTrue(result.success)
+        assertEquals(2, result.iterations)
+        assertEquals("commit-2", result.finalCommitSha)
+        assertEquals("task-resume-verify-2", remote.lastRequest?.jobId)
+        assertTrue(git.lastFiles.isEmpty())
+        assertEquals(null, checkpoints.load("task-resume"))
     }
 
     @Test

@@ -11,7 +11,6 @@ import com.todd.core.tools.GitHubFileContent
 import com.todd.core.tools.GitHubTool
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -48,32 +47,23 @@ data class AutonomousCodingResult(
 )
 
 /**
- * A real model-driven coding loop.
- *
- * The loop deliberately separates:
- * 1. repository inspection,
- * 2. model-selected file reading,
- * 3. model-generated complete-file edits,
- * 4. Git commit,
- * 5. remote build/test verification,
- * 6. retry with the observed failure context.
+ * Model-driven coding loop with durable checkpoints.
  *
  * A commit is never treated as verified until the RemoteExecutor reports COMPLETED.
+ * The checkpoint is persisted before commit and again immediately after commit, so a
+ * process restart can reconnect to the same remote verification job instead of starting over.
  */
 class AutonomousCodingLoop(
     private val aiProvider: AIProvider,
     private val githubTool: GitHubTool,
     private val remoteExecutor: RemoteExecutor,
+    private val checkpointStore: AutonomousCheckpointStore = InMemoryAutonomousCheckpointStore(),
     private val pollIntervalMs: Long = 7_500L,
     private val maxPollsPerIteration: Int = 960
 ) {
 
     suspend fun run(request: AutonomousCodingRequest): Result<AutonomousCodingResult> = runCatching {
-        require(request.taskId.isNotBlank()) { "taskId is required." }
-        require(request.repository.contains("/")) { "Repository must use owner/name format." }
-        require(request.branch.isNotBlank()) { "branch is required." }
-        require(request.objective.isNotBlank()) { "objective is required." }
-        require(request.maxIterations in 1..12) { "maxIterations must be between 1 and 12." }
+        validateRequest(request)
 
         if (!aiProvider.isAvailable()) {
             throw IllegalStateException("The coding AI provider is not available.")
@@ -83,11 +73,140 @@ class AutonomousCodingLoop(
             .getRepositoryInfo(request.repository, request.branch)
             .getOrThrow()
 
-        var headSha = repositoryInfo.latestCommitSha
-        val commits = mutableListOf<String>()
-        var failureContext = ""
+        var checkpoint = checkpointStore.load(request.taskId)
+        if (checkpoint != null && !checkpointMatches(checkpoint, request)) {
+            checkpointStore.delete(request.taskId)
+            checkpoint = null
+        }
 
-        for (iteration in 1..request.maxIterations) {
+        val commits = checkpoint?.commitShas?.toMutableList() ?: mutableListOf()
+        var failureContext = checkpoint?.failureContext.orEmpty()
+        var headSha = repositoryInfo.latestCommitSha
+        var firstIteration = checkpoint?.iteration ?: 1
+
+        if (checkpoint != null) {
+            when (checkpoint.phase) {
+                AutonomousCheckpointPhase.VERIFYING -> {
+                    val committedSha = checkpoint.committedSha
+                        ?: throw IllegalStateException(
+                            "Checkpoint is VERIFYING but has no committed SHA."
+                        )
+                    val verifyJobId = checkpoint.verifyJobId
+                        ?: throw IllegalStateException(
+                            "Checkpoint is VERIFYING but has no remote verification job ID."
+                        )
+
+                    remoteExecutor.startJob(
+                        verificationRequest(
+                            request = request,
+                            iteration = checkpoint.iteration,
+                            commitSha = committedSha,
+                            verifyJobId = verifyJobId
+                        )
+                    ).getOrThrow()
+
+                    val remoteState = waitForTerminalState(verifyJobId)
+                    when (remoteState.status) {
+                        RemoteJobStatus.COMPLETED -> {
+                            checkpointStore.delete(request.taskId)
+                            return@runCatching AutonomousCodingResult(
+                                success = true,
+                                iterations = checkpoint.iteration,
+                                commitShas = commits.toList(),
+                                finalCommitSha = committedSha,
+                                evidenceUrl = remoteState.providerRunUrl,
+                                artifactNames = remoteState.artifactNames
+                            )
+                        }
+
+                        RemoteJobStatus.CANCELLED -> {
+                            checkpointStore.delete(request.taskId)
+                            return@runCatching AutonomousCodingResult(
+                                success = false,
+                                iterations = checkpoint.iteration,
+                                commitShas = commits.toList(),
+                                finalCommitSha = committedSha,
+                                evidenceUrl = remoteState.providerRunUrl,
+                                artifactNames = remoteState.artifactNames,
+                                failureMessage = "Remote verification was cancelled."
+                            )
+                        }
+
+                        else -> {
+                            failureContext = buildFailureContext(
+                                iteration = checkpoint.iteration,
+                                commitSha = committedSha,
+                                changedPaths = checkpoint.changedPaths,
+                                remoteState = remoteState
+                            )
+                            repositoryInfo = githubTool
+                                .getRepositoryInfo(request.repository, request.branch)
+                                .getOrThrow()
+                            headSha = repositoryInfo.latestCommitSha
+                            firstIteration = checkpoint.iteration + 1
+                        }
+                    }
+                }
+
+                AutonomousCheckpointPhase.READY_TO_COMMIT -> {
+                    repositoryInfo = githubTool
+                        .getRepositoryInfo(request.repository, request.branch)
+                        .getOrThrow()
+                    headSha = repositoryInfo.latestCommitSha
+                    firstIteration = checkpoint.iteration
+
+                    if (
+                        checkpoint.headSha.isNotBlank() &&
+                        checkpoint.headSha != repositoryInfo.latestCommitSha
+                    ) {
+                        failureContext = buildString {
+                            if (checkpoint.failureContext.isNotBlank()) {
+                                appendLine(checkpoint.failureContext)
+                            }
+                            appendLine(
+                                "Repository advanced from ${checkpoint.headSha} to " +
+                                    "${repositoryInfo.latestCommitSha} after a prepared patch. " +
+                                    "Re-inspect the current repository state before creating another commit."
+                            )
+                        }.trim()
+                    }
+                }
+
+                AutonomousCheckpointPhase.INSPECTING -> {
+                    repositoryInfo = githubTool
+                        .getRepositoryInfo(request.repository, request.branch)
+                        .getOrThrow()
+                    headSha = repositoryInfo.latestCommitSha
+                    firstIteration = checkpoint.iteration
+                }
+            }
+        }
+
+        if (firstIteration > request.maxIterations) {
+            checkpointStore.delete(request.taskId)
+            return@runCatching AutonomousCodingResult(
+                success = false,
+                iterations = request.maxIterations,
+                commitShas = commits.toList(),
+                finalCommitSha = commits.lastOrNull(),
+                failureMessage = failureContext.ifBlank {
+                    "Autonomous coding reached the iteration limit without verified completion."
+                }
+            )
+        }
+
+        for (iteration in firstIteration..request.maxIterations) {
+            checkpointStore.save(
+                AutonomousCheckpoint(
+                    request = request,
+                    iteration = iteration,
+                    headSha = headSha,
+                    commitShas = commits.toList(),
+                    failureContext = failureContext,
+                    phase = AutonomousCheckpointPhase.INSPECTING
+                )
+            )
+
             val repositoryFiles = githubTool
                 .listRepositoryFiles(request.repository, request.branch)
                 .getOrThrow()
@@ -135,6 +254,20 @@ class AutonomousCodingLoop(
                 }
             }
 
+            val changedPaths = patch.changes.map { it.path }
+
+            checkpointStore.save(
+                AutonomousCheckpoint(
+                    request = request,
+                    iteration = iteration,
+                    headSha = headSha,
+                    commitShas = commits.toList(),
+                    failureContext = failureContext,
+                    phase = AutonomousCheckpointPhase.READY_TO_COMMIT,
+                    changedPaths = changedPaths
+                )
+            )
+
             val newCommit = githubTool.createCommit(
                 repoFullName = request.repository,
                 branch = request.branch,
@@ -148,16 +281,27 @@ class AutonomousCodingLoop(
             headSha = newCommit
 
             val verifyJobId = "${request.taskId}-verify-$iteration"
+
+            checkpointStore.save(
+                AutonomousCheckpoint(
+                    request = request,
+                    iteration = iteration,
+                    headSha = headSha,
+                    commitShas = commits.toList(),
+                    failureContext = failureContext,
+                    phase = AutonomousCheckpointPhase.VERIFYING,
+                    verifyJobId = verifyJobId,
+                    committedSha = newCommit,
+                    changedPaths = changedPaths
+                )
+            )
+
             remoteExecutor.startJob(
-                RemoteJobRequest(
-                    jobId = verifyJobId,
-                    projectId = request.projectId,
-                    repository = request.repository,
-                    branch = request.branch,
-                    startCommit = newCommit,
-                    objective = "Verify autonomous coding iteration $iteration: ${request.objective}",
-                    completionCriteria = request.completionCriteria,
-                    mode = RemoteExecutionMode.VERIFY_ANDROID
+                verificationRequest(
+                    request = request,
+                    iteration = iteration,
+                    commitSha = newCommit,
+                    verifyJobId = verifyJobId
                 )
             ).getOrThrow()
 
@@ -165,6 +309,7 @@ class AutonomousCodingLoop(
 
             when (remoteState.status) {
                 RemoteJobStatus.COMPLETED -> {
+                    checkpointStore.delete(request.taskId)
                     return@runCatching AutonomousCodingResult(
                         success = true,
                         iterations = iteration,
@@ -176,6 +321,7 @@ class AutonomousCodingLoop(
                 }
 
                 RemoteJobStatus.CANCELLED -> {
+                    checkpointStore.delete(request.taskId)
                     return@runCatching AutonomousCodingResult(
                         success = false,
                         iterations = iteration,
@@ -191,7 +337,7 @@ class AutonomousCodingLoop(
                     failureContext = buildFailureContext(
                         iteration = iteration,
                         commitSha = newCommit,
-                        patch = patch,
+                        changedPaths = changedPaths,
                         remoteState = remoteState
                     )
 
@@ -199,10 +345,24 @@ class AutonomousCodingLoop(
                         .getRepositoryInfo(request.repository, request.branch)
                         .getOrThrow()
                     headSha = repositoryInfo.latestCommitSha
+
+                    if (iteration < request.maxIterations) {
+                        checkpointStore.save(
+                            AutonomousCheckpoint(
+                                request = request,
+                                iteration = iteration + 1,
+                                headSha = headSha,
+                                commitShas = commits.toList(),
+                                failureContext = failureContext,
+                                phase = AutonomousCheckpointPhase.INSPECTING
+                            )
+                        )
+                    }
                 }
             }
         }
 
+        checkpointStore.delete(request.taskId)
         AutonomousCodingResult(
             success = false,
             iterations = request.maxIterations,
@@ -213,6 +373,41 @@ class AutonomousCodingLoop(
             }
         )
     }
+
+    private fun validateRequest(request: AutonomousCodingRequest) {
+        require(request.taskId.isNotBlank()) { "taskId is required." }
+        require(request.repository.contains("/")) { "Repository must use owner/name format." }
+        require(request.branch.isNotBlank()) { "branch is required." }
+        require(request.objective.isNotBlank()) { "objective is required." }
+        require(request.maxIterations in 1..12) { "maxIterations must be between 1 and 12." }
+    }
+
+    private fun checkpointMatches(
+        checkpoint: AutonomousCheckpoint,
+        request: AutonomousCodingRequest
+    ): Boolean =
+        checkpoint.request.taskId == request.taskId &&
+            checkpoint.request.projectId == request.projectId &&
+            checkpoint.request.repository == request.repository &&
+            checkpoint.request.branch == request.branch &&
+            checkpoint.request.objective == request.objective
+
+    private fun verificationRequest(
+        request: AutonomousCodingRequest,
+        iteration: Int,
+        commitSha: String,
+        verifyJobId: String
+    ): RemoteJobRequest =
+        RemoteJobRequest(
+            jobId = verifyJobId,
+            projectId = request.projectId,
+            repository = request.repository,
+            branch = request.branch,
+            startCommit = commitSha,
+            objective = "Verify autonomous coding iteration $iteration: ${request.objective}",
+            completionCriteria = request.completionCriteria,
+            mode = RemoteExecutionMode.VERIFY_ANDROID
+        )
 
     private suspend fun selectFiles(
         request: AutonomousCodingRequest,
@@ -350,12 +545,12 @@ class AutonomousCodingLoop(
     private fun buildFailureContext(
         iteration: Int,
         commitSha: String,
-        patch: CodingPatch,
+        changedPaths: List<String>,
         remoteState: RemoteJobState
     ): String = buildString {
         appendLine("Iteration $iteration failed verification.")
         appendLine("Commit: $commitSha")
-        appendLine("Changed files: ${patch.changes.joinToString { it.path }}")
+        appendLine("Changed files: ${changedPaths.joinToString()}")
         appendLine("Remote status: ${remoteState.status}")
         if (remoteState.currentStepDescription.isNotBlank()) {
             appendLine("Failed/current step: ${remoteState.currentStepDescription}")

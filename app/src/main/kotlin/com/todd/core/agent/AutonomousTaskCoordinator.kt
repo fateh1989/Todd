@@ -1,26 +1,25 @@
 package com.todd.core.agent
 
 import com.todd.core.ai.FirebaseRuntimeConfig
+import com.todd.core.model.Task
 import com.todd.core.model.TaskStatus
 import com.todd.core.state.ToddStateMachine
-import com.todd.data.repository.ToddRepository
 import com.todd.core.tools.GitHubCredentialStore
+import com.todd.data.repository.ToddRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Owns autonomous coding work outside the Activity/Compose lifecycle.
- *
- * Closing or recreating MainActivity therefore does not cancel an in-flight coding loop.
- * Durable process-death checkpoints are handled separately; this coordinator intentionally
- * does not claim process-restart recovery until a persisted iteration checkpoint exists.
+ * Owns autonomous coding work outside the Activity/Compose lifecycle and resumes
+ * persisted coding checkpoints after Android recreates the process.
  */
 class AutonomousTaskCoordinator(
     private val repository: ToddRepository,
     private val stateMachine: ToddStateMachine,
     private val githubCredentialStore: GitHubCredentialStore,
     private val codingLoop: AutonomousCodingLoop,
+    private val checkpointStore: AutonomousCheckpointStore,
     private val scope: CoroutineScope
 ) {
     private val runningTaskIds = ConcurrentHashMap.newKeySet<String>()
@@ -32,7 +31,7 @@ class AutonomousTaskCoordinator(
         maxIterations: Int = 4
     ): String {
         val taskId = "code-${System.currentTimeMillis()}-${System.nanoTime()}"
-        runningTaskIds += taskId
+        if (!runningTaskIds.add(taskId)) return taskId
 
         scope.launch {
             try {
@@ -44,30 +43,6 @@ class AutonomousTaskCoordinator(
                     criteria = "Todd must produce a commit and remote Android verification must succeed"
                 )
                 repository.saveTask(task)
-
-                when {
-                    !githubCredentialStore.hasToken() -> {
-                        repository.updateTask(
-                            task.copy(
-                                status = TaskStatus.BLOCKED,
-                                currentStep = "أضف تفويض GitHub من الإعدادات حتى يستطيع Todd قراءة وكتابة المستودع.",
-                                updatedAt = System.currentTimeMillis()
-                            )
-                        )
-                        return@launch
-                    }
-
-                    !FirebaseRuntimeConfig.current().configured -> {
-                        repository.updateTask(
-                            task.copy(
-                                status = TaskStatus.BLOCKED,
-                                currentStep = "نسخة التطبيق الحالية لا تحتوي إعداد Firebase الحقيقي اللازم للذكاء السحابي.",
-                                updatedAt = System.currentTimeMillis()
-                            )
-                        )
-                        return@launch
-                    }
-                }
 
                 val project = repository.getProjectById(projectId)
                 val repoName = project?.repository
@@ -85,55 +60,17 @@ class AutonomousTaskCoordinator(
                     return@launch
                 }
 
-                repository.updateTask(
-                    task.copy(
-                        status = TaskStatus.IN_PROGRESS,
-                        currentStep = "Todd يفحص المستودع ويحدد الملفات اللازمة قبل أي تعديل.",
-                        updatedAt = System.currentTimeMillis()
-                    )
+                val request = AutonomousCodingRequest(
+                    taskId = task.id,
+                    projectId = projectId,
+                    repository = repoName,
+                    branch = branch,
+                    objective = goal,
+                    completionCriteria = task.completionCriteria,
+                    maxIterations = maxIterations
                 )
 
-                val result = codingLoop.run(
-                    AutonomousCodingRequest(
-                        taskId = task.id,
-                        projectId = projectId,
-                        repository = repoName,
-                        branch = branch,
-                        objective = goal,
-                        completionCriteria = task.completionCriteria,
-                        maxIterations = maxIterations
-                    )
-                )
-
-                result.fold(
-                    onSuccess = { coding ->
-                        repository.updateTask(
-                            task.copy(
-                                status = if (coding.success) TaskStatus.VERIFIED else TaskStatus.FAILED,
-                                currentStep = if (coding.success) {
-                                    "اكتمل التعديل البرمجي وتحقق البناء والاختبار عن بُعد."
-                                } else {
-                                    "انتهت دورة البرمجة بدون تحقق ناجح."
-                                },
-                                lastEvidence = coding.evidenceUrl
-                                    ?: coding.finalCommitSha
-                                    ?: task.lastEvidence,
-                                failureCause = coding.failureMessage,
-                                updatedAt = System.currentTimeMillis()
-                            )
-                        )
-                    },
-                    onFailure = { error ->
-                        repository.updateTask(
-                            task.copy(
-                                status = TaskStatus.FAILED,
-                                currentStep = "توقفت دورة البرمجة الذاتية بسبب خطأ فعلي.",
-                                failureCause = error.message,
-                                updatedAt = System.currentTimeMillis()
-                            )
-                        )
-                    }
-                )
+                execute(task, request, resumed = false)
             } finally {
                 runningTaskIds -= taskId
             }
@@ -142,5 +79,118 @@ class AutonomousTaskCoordinator(
         return taskId
     }
 
+    /**
+     * Re-enqueues every durable checkpoint that was left unfinished by process death,
+     * device restart, or a transient provider/network failure.
+     */
+    fun resumePending() {
+        checkpointStore.listPending().forEach { checkpoint ->
+            val request = checkpoint.request
+            if (!runningTaskIds.add(request.taskId)) return@forEach
+
+            scope.launch {
+                try {
+                    val task = repository.getTaskById(request.taskId)
+                        ?: Task(
+                            id = request.taskId,
+                            projectId = request.projectId,
+                            title = request.objective.take(120),
+                            goal = request.objective,
+                            userInstructions = request.objective,
+                            status = TaskStatus.WAITING,
+                            currentStep = "تم العثور على نقطة استئناف محفوظة.",
+                            completionCriteria = request.completionCriteria
+                        ).also { repository.saveTask(it) }
+
+                    execute(task, request, resumed = true)
+                } finally {
+                    runningTaskIds -= request.taskId
+                }
+            }
+        }
+    }
+
     fun isRunning(taskId: String): Boolean = taskId in runningTaskIds
+
+    private suspend fun execute(
+        task: Task,
+        request: AutonomousCodingRequest,
+        resumed: Boolean
+    ) {
+        if (!githubCredentialStore.hasToken()) {
+            repository.updateTask(
+                task.copy(
+                    status = TaskStatus.BLOCKED,
+                    currentStep = if (resumed) {
+                        "نقطة الاستئناف محفوظة. أضف تفويض GitHub ثم سيستطيع Todd المتابعة."
+                    } else {
+                        "أضف تفويض GitHub من الإعدادات حتى يستطيع Todd قراءة وكتابة المستودع."
+                    },
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
+            return
+        }
+
+        if (!FirebaseRuntimeConfig.current().configured) {
+            repository.updateTask(
+                task.copy(
+                    status = TaskStatus.BLOCKED,
+                    currentStep = "نقطة الاستئناف محفوظة، لكن نسخة التطبيق تحتاج إعداد Firebase الحقيقي للذكاء السحابي.",
+                    updatedAt = System.currentTimeMillis()
+                )
+            )
+            return
+        }
+
+        repository.updateTask(
+            task.copy(
+                status = TaskStatus.IN_PROGRESS,
+                currentStep = if (resumed) {
+                    "Todd استعاد نقطة الاستئناف ويكمل من آخر مرحلة محفوظة."
+                } else {
+                    "Todd يفحص المستودع ويحدد الملفات اللازمة قبل أي تعديل."
+                },
+                failureCause = null,
+                updatedAt = System.currentTimeMillis()
+            )
+        )
+
+        val result = codingLoop.run(request)
+
+        result.fold(
+            onSuccess = { coding ->
+                repository.updateTask(
+                    task.copy(
+                        status = if (coding.success) TaskStatus.VERIFIED else TaskStatus.FAILED,
+                        currentStep = if (coding.success) {
+                            "اكتمل التعديل البرمجي وتحقق البناء والاختبار عن بُعد."
+                        } else {
+                            "انتهت دورة البرمجة بدون تحقق ناجح."
+                        },
+                        lastEvidence = coding.evidenceUrl
+                            ?: coding.finalCommitSha
+                            ?: task.lastEvidence,
+                        failureCause = coding.failureMessage,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                )
+            },
+            onFailure = { error ->
+                val checkpointStillExists = checkpointStore.load(task.id) != null
+                repository.updateTask(
+                    task.copy(
+                        status = if (checkpointStillExists) TaskStatus.WAITING else TaskStatus.FAILED,
+                        currentStep = if (checkpointStillExists) {
+                            "توقف التنفيذ مؤقتاً، ونقطة الاستئناف محفوظة للمتابعة دون البدء من الصفر."
+                        } else {
+                            "توقفت دورة البرمجة الذاتية بسبب خطأ فعلي."
+                        },
+                        failureCause = error.message,
+                        updatedAt = System.currentTimeMillis()
+                    )
+                )
+            }
+        )
+    }
 }
