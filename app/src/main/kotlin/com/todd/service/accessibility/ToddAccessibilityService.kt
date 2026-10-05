@@ -17,7 +17,12 @@ data class ScreenContextSnapshot(
 
 class ToddAccessibilityService : AccessibilityService() {
 
+    private var lastCaptureAt: Long = 0L
+
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        val now = System.currentTimeMillis()
+        if (now - lastCaptureAt < MIN_CAPTURE_INTERVAL_MS) return
+        lastCaptureAt = now
         captureCurrentScreen(event)
     }
 
@@ -55,7 +60,11 @@ class ToddAccessibilityService : AccessibilityService() {
     }
 
     private fun traverseNode(node: AccessibilityNodeInfo?, sb: StringBuilder, depth: Int) {
-        if (node == null || depth > MAX_DEPTH) return
+        if (
+            node == null ||
+            depth > MAX_DEPTH ||
+            sb.length >= MAX_SCREEN_CONTEXT_CHARS
+        ) return
 
         val text = node.text?.toString()?.trim().orEmpty()
         val description = node.contentDescription?.toString()?.trim().orEmpty()
@@ -98,6 +107,7 @@ class ToddAccessibilityService : AccessibilityService() {
         }
 
         for (i in 0 until node.childCount) {
+            if (sb.length >= MAX_SCREEN_CONTEXT_CHARS) break
             val child = node.getChild(i)
             try {
                 traverseNode(child, sb, depth + 1)
@@ -119,7 +129,9 @@ class ToddAccessibilityService : AccessibilityService() {
     }
 
     companion object {
-        private const val MAX_DEPTH = 32
+        private const val MIN_CAPTURE_INTERVAL_MS = 1000L
+        private const val MAX_DEPTH = 16
+        private const val MAX_SCREEN_CONTEXT_CHARS = 12000
 
         @Volatile
         var instance: ToddAccessibilityService? = null
