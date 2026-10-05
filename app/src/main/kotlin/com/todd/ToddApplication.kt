@@ -234,7 +234,30 @@ class ToddApplication : Application() {
             aiProvider = geminiProvider,
             githubTool = githubTool,
             remoteExecutor = remoteExecutor,
-            checkpointStore = autonomousCheckpointStore
+            checkpointStore = autonomousCheckpointStore,
+            onProgress = { taskId, message ->
+                val now = System.currentTimeMillis()
+                repository.saveMemory(
+                    com.todd.core.model.MemoryEntry(
+                        id = "coding-log-$taskId-${System.nanoTime()}",
+                        projectId = repository.getTaskById(taskId)?.projectId,
+                        layer = com.todd.core.model.MemoryLayer.TASK,
+                        key = "coding-log:$taskId:$now",
+                        value = message,
+                        provenance = "TOOL",
+                        isVerified = true,
+                        timestamp = now
+                    )
+                )
+                repository.getTaskById(taskId)?.let { task ->
+                    repository.updateTask(
+                        task.copy(
+                            currentStep = message,
+                            updatedAt = now
+                        )
+                    )
+                }
+            }
         )
         autonomousTaskCoordinator = AutonomousTaskCoordinator(
             repository = repository,
