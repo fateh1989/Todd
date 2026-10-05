@@ -445,6 +445,18 @@ fun ToddMainScreen(
                     },
                     onTaskAction = { title, goal ->
                         scope.launch {
+                            val now = System.currentTimeMillis()
+                            app.repository.saveMemory(
+                                MemoryEntry(
+                                    id = "chat-user-${System.nanoTime()}",
+                                    projectId = projectId,
+                                    layer = MemoryLayer.EPISODIC,
+                                    key = "chat:user:$now",
+                                    value = goal,
+                                    provenance = "USER",
+                                    isVerified = true
+                                )
+                            )
                             val task = stateMachine.planTask(
                                 taskId = "task-${System.currentTimeMillis()}",
                                 projectId = projectId,
@@ -453,6 +465,17 @@ fun ToddMainScreen(
                                 criteria = "GitHub Actions verification must complete with evidence"
                             )
                             app.repository.saveTask(task)
+                            app.repository.saveMemory(
+                                MemoryEntry(
+                                    id = "chat-todd-${System.nanoTime()}",
+                                    projectId = projectId,
+                                    layer = MemoryLayer.EPISODIC,
+                                    key = "chat:todd:${System.currentTimeMillis()}",
+                                    value = "بدأ التحقق البعيد. رقم المهمة: ${task.id}",
+                                    provenance = "SYSTEM",
+                                    isVerified = false
+                                )
+                            )
 
                             if (!app.githubCredentialStore.hasToken()) {
                                 app.repository.updateTask(
@@ -460,6 +483,17 @@ fun ToddMainScreen(
                                         status = TaskStatus.BLOCKED,
                                         currentStep = "أضف تفويض GitHub من الإعدادات لتشغيل المهمة البعيدة.",
                                         updatedAt = System.currentTimeMillis()
+                                    )
+                                )
+                                app.repository.saveMemory(
+                                    MemoryEntry(
+                                        id = "chat-todd-${System.nanoTime()}",
+                                        projectId = projectId,
+                                        layer = MemoryLayer.EPISODIC,
+                                        key = "chat:todd:${System.currentTimeMillis()}",
+                                        value = "تعذر بدء التحقق البعيد: تفويض GitHub غير مضاف بعد.",
+                                        provenance = "SYSTEM",
+                                        isVerified = true
                                     )
                                 )
                             } else {
@@ -515,12 +549,37 @@ fun ToddMainScreen(
                         }
                     },
                     onAutonomousCodingTask = { title, goal ->
-                        app.autonomousTaskCoordinator.start(
+                        val taskId = app.autonomousTaskCoordinator.start(
                             projectId = projectId,
                             title = title,
                             goal = goal,
                             maxIterations = 4
                         )
+                        scope.launch {
+                            val now = System.currentTimeMillis()
+                            app.repository.saveMemory(
+                                MemoryEntry(
+                                    id = "chat-user-${System.nanoTime()}",
+                                    projectId = projectId,
+                                    layer = MemoryLayer.EPISODIC,
+                                    key = "chat:user:$now",
+                                    value = goal,
+                                    provenance = "USER",
+                                    isVerified = true
+                                )
+                            )
+                            app.repository.saveMemory(
+                                MemoryEntry(
+                                    id = "chat-todd-${System.nanoTime()}",
+                                    projectId = projectId,
+                                    layer = MemoryLayer.EPISODIC,
+                                    key = "chat:todd:${System.currentTimeMillis()}",
+                                    value = "بدأت مهمة البرمجة. رقم المهمة: $taskId",
+                                    provenance = "SYSTEM",
+                                    isVerified = false
+                                )
+                            )
+                        }
                     }
                 )
                 1 -> ProjectsView(
@@ -848,8 +907,20 @@ fun HomeDashboard(
     onAutonomousCodingTask: (String, String) -> Unit
 ) {
     var quickInput by remember { mutableStateOf("") }
-    var translationMode by remember { mutableStateOf(false) }
+    var actionMode by remember { mutableStateOf("CHAT") }
     val chatListState = rememberLazyListState()
+
+    fun submitCurrentInput() {
+        val text = quickInput.trim()
+        if (text.isBlank() || isBusy) return
+
+        when (actionMode) {
+            "REMOTE" -> onTaskAction(text, text)
+            "CODING" -> onAutonomousCodingTask(text, text)
+            else -> onSendMessage(text, actionMode == "TRANSLATION")
+        }
+        quickInput = ""
+    }
 
     // Entering the chat, receiving a new message, or starting a reply should show
     // the newest part of the conversation instead of returning to the first message.
@@ -935,66 +1006,65 @@ fun HomeDashboard(
             horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             TextButton(
-                onClick = { translationMode = !translationMode },
+                onClick = {
+                    actionMode = if (actionMode == "TRANSLATION") "CHAT" else "TRANSLATION"
+                },
                 enabled = !isBusy,
                 contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
             ) {
                 Text(
-                    if (translationMode) "محادثة الترجمة ✓" else "محادثة الترجمة",
+                    if (actionMode == "TRANSLATION") "محادثة الترجمة ✓" else "محادثة الترجمة",
                     fontSize = 10.sp
                 )
             }
             TextButton(
                 onClick = {
-                    if (quickInput.isNotBlank()) {
-                        onTaskAction(quickInput, quickInput)
-                        quickInput = ""
-                    }
+                    actionMode = if (actionMode == "REMOTE") "CHAT" else "REMOTE"
                 },
                 enabled = !isBusy,
                 contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
             ) {
-                Text("تحقق بعيد", fontSize = 10.sp)
+                Text(
+                    if (actionMode == "REMOTE") "تحقق بعيد ✓" else "تحقق بعيد",
+                    fontSize = 10.sp
+                )
             }
             TextButton(
                 onClick = {
-                    if (quickInput.isNotBlank()) {
-                        onAutonomousCodingTask(quickInput, quickInput)
-                        quickInput = ""
-                    }
+                    actionMode = if (actionMode == "CODING") "CHAT" else "CODING"
                 },
                 enabled = !isBusy,
                 contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
             ) {
-                Text("برمجة", fontSize = 10.sp)
+                Text(
+                    if (actionMode == "CODING") "برمجة ✓" else "برمجة",
+                    fontSize = 10.sp
+                )
             }
         }
 
         OutlinedTextField(
             value = quickInput,
             onValueChange = { quickInput = it },
-            placeholder = { Text("اكتب لتود...") },
+            placeholder = {
+                Text(
+                    when (actionMode) {
+                        "TRANSLATION" -> "اكتب النص للترجمة..."
+                        "REMOTE" -> "اكتب ما تريد التحقق منه..."
+                        "CODING" -> "اكتب مهمة البرمجة..."
+                        else -> "اكتب لتود..."
+                    }
+                )
+            },
             modifier = Modifier.fillMaxWidth(),
             maxLines = 4,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
             keyboardActions = KeyboardActions(
-                onSend = {
-                    val text = quickInput.trim()
-                    if (text.isNotBlank() && !isBusy) {
-                        onSendMessage(text, translationMode)
-                        quickInput = ""
-                    }
-                }
+                onSend = { submitCurrentInput() }
             ),
             trailingIcon = {
                 IconButton(
-                    onClick = {
-                        val text = quickInput.trim()
-                        if (text.isNotBlank() && !isBusy) {
-                            onSendMessage(text, translationMode)
-                            quickInput = ""
-                        }
-                    },
+                    onClick = { submitCurrentInput() },
                     enabled = quickInput.isNotBlank() && !isBusy
                 ) {
                     Icon(
