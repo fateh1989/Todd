@@ -244,14 +244,8 @@ class AutonomousCodingLoop(
                 throw IllegalStateException("The coding model returned no file changes.")
             }
 
-            val allowedPaths = repositoryFiles.toSet()
             patch.changes.forEach { change ->
                 validateChangePath(change.path)
-                if (change.path !in allowedPaths) {
-                    throw IllegalStateException(
-                        "The coding model attempted to edit a path that was not present in the inspected repository tree: ${change.path}"
-                    )
-                }
             }
 
             val changedPaths = patch.changes.map { it.path }
@@ -501,11 +495,13 @@ class AutonomousCodingLoop(
                     {
                       "commitMessage":"short git commit message",
                       "changes":[
-                        {"path":"existing/path","content":"complete new file content"}
+                        {"path":"repository/relative/path","content":"complete new file content"}
                       ]
                     }
 
-                    Change only files shown above. Do not use markdown fences.
+                    You may replace a file shown above or create a new text/source/config file when the goal technically requires it.
+                    New paths must be repository-relative. Never use generated build output or binary file paths.
+                    Do not use markdown fences.
                 """.trimIndent(),
                 temperature = 0.15f,
                 maxTokens = 16384
@@ -580,6 +576,7 @@ class AutonomousCodingLoop(
         require(!path.startsWith("/")) { "Absolute paths are not allowed." }
         require(path.split('/').none { it == ".." }) { "Parent path traversal is not allowed." }
         require(isTextCandidate(path)) { "Binary or generated output paths are not editable." }
+        require(!path.contains('\u0000')) { "Invalid path." }
     }
 
     private fun isTextCandidate(path: String): Boolean {
@@ -598,7 +595,9 @@ class AutonomousCodingLoop(
             lower.endsWith(".webp") ||
             lower.endsWith(".gif") ||
             lower.endsWith(".pdf") ||
-            lower.endsWith(".zip")
+            lower.endsWith(".zip") ||
+            lower.endsWith(".keystore") ||
+            lower.endsWith(".jks")
         ) {
             return false
         }

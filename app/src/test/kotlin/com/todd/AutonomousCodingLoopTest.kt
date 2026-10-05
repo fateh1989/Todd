@@ -114,12 +114,45 @@ class AutonomousCodingLoopTest {
     }
 
     @Test
-    fun `autonomous loop rejects invented change paths`() = runBlocking {
+    fun `autonomous loop can create a new source file when the model requires it`() = runBlocking {
         val ai = ScriptedProvider(
             responses = ArrayDeque(
                 listOf(
                     """{"files":["app/src/main/kotlin/com/todd/Example.kt"]}""",
-                    """{"commitMessage":"bad","changes":[{"path":"invented/Secret.kt","content":"bad"}]}"""
+                    """{"commitMessage":"feat: add helper","changes":[{"path":"app/src/main/kotlin/com/todd/NewHelper.kt","content":"package com.todd\nclass NewHelper"}]}"""
+                )
+            )
+        )
+        val git = FakeGitHubTool()
+
+        val result = AutonomousCodingLoop(
+            aiProvider = ai,
+            githubTool = git,
+            remoteExecutor = CompletedRemoteExecutor(),
+            pollIntervalMs = 0L,
+            maxPollsPerIteration = 1
+        ).run(
+            AutonomousCodingRequest(
+                taskId = "task-new-file",
+                projectId = "todd-main",
+                repository = "fateh1989/Todd",
+                branch = "main",
+                objective = "Add a helper class",
+                completionCriteria = "green"
+            )
+        ).getOrThrow()
+
+        assertTrue(result.success)
+        assertTrue(git.lastFiles.containsKey("app/src/main/kotlin/com/todd/NewHelper.kt"))
+    }
+
+    @Test
+    fun `autonomous loop rejects parent path traversal`() = runBlocking {
+        val ai = ScriptedProvider(
+            responses = ArrayDeque(
+                listOf(
+                    """{"files":["app/src/main/kotlin/com/todd/Example.kt"]}""",
+                    """{"commitMessage":"bad","changes":[{"path":"../Secret.kt","content":"bad"}]}"""
                 )
             )
         )
@@ -142,7 +175,7 @@ class AutonomousCodingLoopTest {
         )
 
         assertTrue(result.isFailure)
-        assertTrue(result.exceptionOrNull()?.message?.contains("not present") == true)
+        assertTrue(result.exceptionOrNull()?.message?.contains("Parent path traversal") == true)
     }
 
     private class ScriptedProvider(
