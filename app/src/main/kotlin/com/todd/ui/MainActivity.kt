@@ -20,6 +20,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -320,10 +321,12 @@ fun ToddMainScreen(
                 .background(Color(0xFF0F172A))
                 .padding(horizontal = 10.dp, vertical = 8.dp)
         ) {
-            // Status Card
-            StatusCard(state, onStartOverlay)
-
-            Spacer(modifier = Modifier.height(8.dp))
+            // Keep the chat screen focused on the conversation. Detailed status stays
+            // available on the other tabs without consuming the home/chat viewport.
+            if (selectedTab != 0) {
+                StatusCard(state, onStartOverlay)
+                Spacer(modifier = Modifier.height(6.dp))
+            }
 
             when (selectedTab) {
                 0 -> HomeDashboard(
@@ -348,7 +351,7 @@ fun ToddMainScreen(
                         }
                     },
                     onToggleVoiceMute = { app.liveClient.toggleMute() },
-                    onSendMessage = { message ->
+                    onSendMessage = { message, translationMode ->
                         if (message.isNotBlank() && !isChatBusy) {
                             scope.launch {
                                 isChatBusy = true
@@ -374,6 +377,11 @@ fun ToddMainScreen(
                                 val result = app.textAgent.respond(
                                     com.todd.core.ai.AIRequest(
                                         prompt = message,
+                                        systemPrompt = if (translationMode) {
+                                            "أنت في وضع محادثة الترجمة. ترجم كلام المستخدم مباشرة بين العربية والإنجليزية، أو إلى اللغة التي يحددها. أعد الترجمة فقط دون شرح إضافي، وحافظ على الأسماء والأرقام والمعنى."
+                                        } else {
+                                            null
+                                        },
                                         projectContext = contextBeforeMessage,
                                         screenContext = DeviceContextProvider.currentTextContext().ifBlank { null },
                                         screenImagePath = ScreenCaptureStore.latestFile()?.absolutePath
@@ -835,11 +843,31 @@ fun HomeDashboard(
     onGeminiModelChange: (GeminiCloudModel) -> Unit,
     onToggleVoice: () -> Unit,
     onToggleVoiceMute: () -> Unit,
-    onSendMessage: (String) -> Unit,
+    onSendMessage: (String, Boolean) -> Unit,
     onTaskAction: (String, String) -> Unit,
     onAutonomousCodingTask: (String, String) -> Unit
 ) {
     var quickInput by remember { mutableStateOf("") }
+    var translationMode by remember { mutableStateOf(false) }
+    val chatListState = rememberLazyListState()
+
+    // Entering the chat, receiving a new message, or starting a reply should show
+    // the newest part of the conversation instead of returning to the first message.
+    LaunchedEffect(messages.size, isBusy) {
+        val targetIndex = when {
+            isBusy -> messages.size
+            messages.isNotEmpty() -> messages.lastIndex
+            else -> -1
+        }
+        if (targetIndex >= 0) chatListState.scrollToItem(targetIndex)
+    }
+
+    // When the keyboard opens and typing begins, keep the latest message in view.
+    LaunchedEffect(quickInput.isNotEmpty()) {
+        if (quickInput.isNotEmpty() && messages.isNotEmpty()) {
+            chatListState.scrollToItem(messages.lastIndex)
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -856,9 +884,9 @@ fun HomeDashboard(
             onToggleMute = onToggleVoiceMute
         )
 
-        Spacer(modifier = Modifier.height(6.dp))
-        Text("محادثة Todd", fontWeight = FontWeight.Bold, color = Color.White)
-        Spacer(modifier = Modifier.height(6.dp))
+        Spacer(modifier = Modifier.height(3.dp))
+        Text("محادثة Todd", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
+        Spacer(modifier = Modifier.height(2.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilterChip(
                 selected = selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_5,
@@ -874,10 +902,11 @@ fun HomeDashboard(
         Spacer(modifier = Modifier.height(8.dp))
 
         LazyColumn(
+            state = chatListState,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             items(messages, key = { it.id }) { message ->
                 val isUser = message.key.startsWith("chat:user:")
@@ -887,8 +916,8 @@ fun HomeDashboard(
                 ) {
                     Surface(
                         color = if (isUser) Color(0xFF4338CA) else Color(0xFF1E293B),
-                        shape = RoundedCornerShape(14.dp),
-                        modifier = Modifier.fillMaxWidth(0.88f)
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(0.98f)
                     ) {
                         Text(
                             text = message.value,
@@ -907,8 +936,18 @@ fun HomeDashboard(
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(4.dp)
+            horizontalArrangement = Arrangement.spacedBy(2.dp)
         ) {
+            TextButton(
+                onClick = { translationMode = !translationMode },
+                enabled = !isBusy,
+                contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
+            ) {
+                Text(
+                    if (translationMode) "محادثة الترجمة ✓" else "محادثة الترجمة",
+                    fontSize = 10.sp
+                )
+            }
             TextButton(
                 onClick = {
                     if (quickInput.isNotBlank()) {
@@ -917,9 +956,9 @@ fun HomeDashboard(
                     }
                 },
                 enabled = !isBusy,
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
             ) {
-                Text("تحقق بعيد", fontSize = 11.sp)
+                Text("تحقق بعيد", fontSize = 10.sp)
             }
             TextButton(
                 onClick = {
@@ -929,9 +968,9 @@ fun HomeDashboard(
                     }
                 },
                 enabled = !isBusy,
-                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
             ) {
-                Text("برمجة", fontSize = 11.sp)
+                Text("برمجة", fontSize = 10.sp)
             }
         }
 
@@ -946,7 +985,7 @@ fun HomeDashboard(
                 onSend = {
                     val text = quickInput.trim()
                     if (text.isNotBlank() && !isBusy) {
-                        onSendMessage(text)
+                        onSendMessage(text, translationMode)
                         quickInput = ""
                     }
                 }
@@ -956,7 +995,7 @@ fun HomeDashboard(
                     onClick = {
                         val text = quickInput.trim()
                         if (text.isNotBlank() && !isBusy) {
-                            onSendMessage(text)
+                            onSendMessage(text, translationMode)
                             quickInput = ""
                         }
                     },
@@ -1000,54 +1039,49 @@ fun VoiceConversationCard(
 
     Card(
         colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
-        shape = RoundedCornerShape(12.dp),
+        shape = RoundedCornerShape(10.dp),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column {
-                    Text("الصوت المباشر", color = Color.White, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
-                    Text(stateLabel, color = Color(0xFF94A3B8), fontSize = 12.sp)
-                }
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "الصوت: $stateLabel",
+                color = Color(0xFFCBD5E1),
+                fontSize = 11.sp,
+                maxLines = 1
+            )
 
-                Row {
-                    if (active) {
-                        IconButton(onClick = onToggleMute) {
-                            Icon(
-                                if (muted) Icons.Default.MicOff else Icons.Default.Mic,
-                                contentDescription = "Mute",
-                                tint = if (muted) Color(0xFFF59E0B) else Color.White
-                            )
-                        }
-                    }
-                    Button(
-                        onClick = onToggle,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (active) Color(0xFFB91C1C) else Color(0xFF4F46E5)
-                        )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (active) {
+                    IconButton(
+                        onClick = onToggleMute,
+                        modifier = Modifier.size(32.dp)
                     ) {
                         Icon(
-                            if (active) Icons.Default.Stop else Icons.Default.Mic,
-                            contentDescription = null,
+                            if (muted) Icons.Default.MicOff else Icons.Default.Mic,
+                            contentDescription = "Mute",
+                            tint = if (muted) Color(0xFFF59E0B) else Color.White,
                             modifier = Modifier.size(16.dp)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(if (active) "إيقاف" else "تحدث")
                     }
                 }
-            }
-
-            transcripts.takeLast(3).forEach { item ->
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = "${if (item.sender == "USER") "أنت" else "Todd"}: ${item.text}",
-                    color = Color(0xFFCBD5E1),
-                    fontSize = 12.sp
-                )
+                TextButton(
+                    onClick = onToggle,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                ) {
+                    Icon(
+                        if (active) Icons.Default.Stop else Icons.Default.Mic,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(if (active) "إيقاف" else "تحدث", fontSize = 11.sp)
+                }
             }
         }
     }
