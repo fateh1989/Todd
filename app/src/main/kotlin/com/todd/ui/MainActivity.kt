@@ -959,6 +959,8 @@ fun ProjectsView(
         }
     }
 
+    }
+
     if (showCreate) {
         var projectName by remember { mutableStateOf("") }
         var repositoryName by remember { mutableStateOf("") }
