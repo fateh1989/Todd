@@ -17,7 +17,7 @@ class SelectableGeminiAIProviderTest {
     fun `uses lite model when owner selects lite`() = runBlocking {
         val lite = RecordingProvider("lite")
         val strong = RecordingProvider("strong")
-        var selected = GeminiCloudModel.FLASH_LITE_3_1
+        var selected = GeminiCloudModel.FLASH_LITE_3_5
         val provider = SelectableGeminiAIProvider({ selected }, lite, strong)
 
         assertEquals("lite", provider.generateText(AIRequest("hello")).getOrThrow().text)
