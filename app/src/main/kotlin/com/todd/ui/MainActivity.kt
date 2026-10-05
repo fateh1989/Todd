@@ -45,6 +45,7 @@ import com.todd.core.ai.LocalOnDeviceAIProvider
 import com.todd.core.ai.GeminiCloudModel
 import com.todd.core.ai.GeminiUsageSnapshot
 import com.todd.core.remote.RemoteExecutionMode
+import com.todd.core.rules.ActionCategory
 import com.todd.core.remote.RemoteJobRequest
 import com.todd.core.agent.AutonomousCodingRequest
 import com.todd.core.diagnostics.ToddDiagnosticReport
@@ -194,6 +195,7 @@ fun ToddMainScreen(
     val liveMuted by app.liveClient.isMuted.collectAsState()
     val visualScreen by ScreenCaptureStore.state.collectAsState()
     val geminiUsage by app.geminiUsageTracker.usage.collectAsState()
+    val activeRules by app.repository.getActiveRules().collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
 
     var selectedTab by remember { mutableStateOf(0) }
@@ -607,6 +609,7 @@ fun ToddMainScreen(
                     notificationAccessEnabled = notificationAccessEnabled,
                     githubTokenConfigured = app.githubCredentialStore.hasToken(),
                     learnedMemories = learnedMemories,
+                    activeRules = activeRules,
                     geminiApiKeyConfigured = geminiApiKeyConfigured,
                     selectedGeminiModel = selectedGeminiModel,
                     firebaseConfigured = firebaseRuntimeStatus.configured,
@@ -723,6 +726,9 @@ fun ToddMainScreen(
                     onClearGitHubToken = { app.githubCredentialStore.clearToken() },
                     onDeleteLearnedMemory = { memory ->
                         scope.launch { app.repository.deleteMemory(memory) }
+                    },
+                    onSaveRule = { rule ->
+                        scope.launch { app.repository.saveRule(rule) }
                     },
                     diagnosticsReport = diagnosticsReport,
                     diagnosticsBusy = diagnosticsBusy,
@@ -1376,6 +1382,7 @@ fun SettingsView(
     notificationAccessEnabled: Boolean,
     githubTokenConfigured: Boolean,
     learnedMemories: List<MemoryEntry>,
+    activeRules: List<Rule>,
     geminiApiKeyConfigured: Boolean,
     selectedGeminiModel: GeminiCloudModel,
     firebaseConfigured: Boolean,
@@ -1396,6 +1403,7 @@ fun SettingsView(
     onSaveGitHubToken: (String) -> Unit,
     onClearGitHubToken: () -> Unit,
     onDeleteLearnedMemory: (MemoryEntry) -> Unit,
+    onSaveRule: (Rule) -> Unit,
     diagnosticsReport: ToddDiagnosticReport?,
     diagnosticsBusy: Boolean,
     onRunDiagnostics: () -> Unit,
@@ -1685,6 +1693,103 @@ fun SettingsView(
                 color = Color(0xFF94A3B8)
             )
         }
+
+        Spacer(modifier = Modifier.height(20.dp))
+        Text("صلاحيات تنفيذ Todd", fontWeight = FontWeight.Bold, color = Color.White)
+        Text(
+            "أنت تحدد ما الذي ينفذه Todd مباشرة وما الذي يجب أن يطلب موافقتك عليه.",
+            fontSize = 12.sp,
+            color = Color(0xFF94A3B8)
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+
+        val shellRule = activeRules.firstOrNull {
+            it.category == ActionCategory.RUN_SHELL_COMMAND.name
+        }
+        val shellPreapproved = shellRule?.behavior
+            ?.let { it == RuleBehavior.ALLOW_IF_PREAPPROVED || it == RuleBehavior.ALLOW_WITHOUT_ASKING }
+            ?: true
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("تنفيذ مهام البرمجة التي أطلبها", color = Color.White, fontSize = 13.sp)
+                Text(
+                    "إذا طلبت صراحةً إصلاحًا أو بناءً أو تحققًا، يبدأ Todd المهمة دون سؤال ثانٍ.",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 11.sp
+                )
+            }
+            Switch(
+                checked = shellPreapproved,
+                onCheckedChange = { enabled ->
+                    onSaveRule(
+                        Rule(
+                            id = "owner-permission-run-shell",
+                            category = ActionCategory.RUN_SHELL_COMMAND.name,
+                            behavior = if (enabled) {
+                                RuleBehavior.ALLOW_IF_PREAPPROVED
+                            } else {
+                                RuleBehavior.ASK_BEFORE_ACTION
+                            },
+                            explanation = "Owner-configured autonomous coding/verification permission.",
+                            isEnabled = true
+                        )
+                    )
+                }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        val mainPushRule = activeRules.firstOrNull {
+            it.category == ActionCategory.GIT_PUSH_MAIN.name
+        }
+        val mainPushPreapproved = mainPushRule?.behavior
+            ?.let { it == RuleBehavior.ALLOW_IF_PREAPPROVED || it == RuleBehavior.ALLOW_WITHOUT_ASKING }
+            ?: false
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("الدفع إلى الفرع الرئيسي عند طلبي الصريح", color = Color.White, fontSize = 13.sp)
+                Text(
+                    "مغلق افتراضيًا. عند تشغيله يسمح بالدفع إلى main فقط عندما تطلب ذلك بوضوح.",
+                    color = Color(0xFF94A3B8),
+                    fontSize = 11.sp
+                )
+            }
+            Switch(
+                checked = mainPushPreapproved,
+                onCheckedChange = { enabled ->
+                    onSaveRule(
+                        Rule(
+                            id = "owner-permission-main-push",
+                            category = ActionCategory.GIT_PUSH_MAIN.name,
+                            behavior = if (enabled) {
+                                RuleBehavior.ALLOW_IF_PREAPPROVED
+                            } else {
+                                RuleBehavior.ASK_BEFORE_ACTION
+                            },
+                            explanation = "Owner-configured permission for explicit main-branch pushes.",
+                            isEnabled = true
+                        )
+                    )
+                }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            "حذف الفروع وForce Push يبقيان محجوبين بقواعد أمان ثابتة ولا يمكن لمفتاح هنا تجاوزهما.",
+            fontSize = 11.sp,
+            color = Color(0xFFF59E0B)
+        )
 
         Spacer(modifier = Modifier.height(20.dp))
         Text("فهم الشاشة", fontWeight = FontWeight.Bold, color = Color.White)
