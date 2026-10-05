@@ -102,6 +102,9 @@ dependencies {
     implementation(libs.kotlinx.coroutines.android)
     implementation(libs.kotlinx.serialization.json)
 
+    // Direct Gemini Live WebSocket transport.
+    implementation(libs.okhttp)
+
     // Firebase AI Logic and App Check
     implementation(platform(libs.firebase.bom))
     implementation(libs.firebase.ai)
