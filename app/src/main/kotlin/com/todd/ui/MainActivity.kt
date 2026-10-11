@@ -19,6 +19,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
@@ -45,6 +47,7 @@ import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.core.content.ContextCompat
@@ -984,6 +987,11 @@ fun HomeDashboard(
     var quickInput by remember { mutableStateOf("") }
     var actionMode by remember { mutableStateOf("CHAT") }
     var composerFocused by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
+    val failedLastMessage = messages.lastOrNull()?.takeIf {
+        it.provenance == "SYSTEM" && it.value.startsWith("تعذر إكمال الطلب الآن:")
+    }
+    val lastUserMessage = messages.lastOrNull { it.key.startsWith("chat:user:") }
     val chatListState = rememberLazyListState()
     val density = LocalDensity.current
     val imeVisible = WindowInsets.ime.getBottom(density) > 0
@@ -1068,7 +1076,22 @@ fun HomeDashboard(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth(0.98f)
                     ) {
-                        MessageTextWithLinks(message.value)
+                        Row(verticalAlignment = Alignment.Top) {
+                            Box(modifier = Modifier.weight(1f)) {
+                                MessageTextWithLinks(message.value)
+                            }
+                            IconButton(
+                                onClick = { clipboard.setText(AnnotatedString(message.value)) },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.ContentCopy,
+                                    contentDescription = "نسخ الرسالة",
+                                    tint = Color(0xFFCBD5E1),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1082,56 +1105,61 @@ fun HomeDashboard(
         Column(
             modifier = Modifier.fillMaxWidth()
         ) {
-            Row(
+            if (failedLastMessage != null && lastUserMessage != null) {
+                TextButton(
+                    onClick = { quickInput = lastUserMessage.value },
+                    enabled = !isBusy,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("استعادة الطلب الذي فشل", fontSize = 12.sp)
+                }
+            }
+
+            // Scrollable, readable action chips instead of four tiny labels.
+            LazyRow(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                TextButton(
-                    onClick = {
-                        actionMode = if (actionMode == "TRANSLATION") "CHAT" else "TRANSLATION"
-                    },
-                    enabled = !isBusy,
-                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
-                ) {
-                    Text(
-                        if (actionMode == "TRANSLATION") "محادثة الترجمة ✓" else "محادثة الترجمة",
-                        fontSize = 10.sp
+                item {
+                    FilterChip(
+                        selected = actionMode == "CHAT",
+                        onClick = { actionMode = "CHAT" },
+                        enabled = !isBusy,
+                        label = { Text("محادثة", fontSize = 12.sp) }
                     )
                 }
-                TextButton(
-                    onClick = {
-                        actionMode = if (actionMode == "REMOTE") "CHAT" else "REMOTE"
-                    },
-                    enabled = !isBusy,
-                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
-                ) {
-                    Text(
-                        if (actionMode == "REMOTE") "تحقق بعيد ✓" else "تحقق بعيد",
-                        fontSize = 10.sp
+                item {
+                    FilterChip(
+                        selected = actionMode == "TRANSLATION",
+                        onClick = { actionMode = "TRANSLATION" },
+                        enabled = !isBusy,
+                        label = { Text("محادثة الترجمة", fontSize = 12.sp) }
                     )
                 }
-                TextButton(
-                    onClick = {
-                        actionMode = if (actionMode == "CODING") "CHAT" else "CODING"
-                    },
-                    enabled = !isBusy,
-                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
-                ) {
-                    Text(
-                        if (actionMode == "CODING") "برمجة ✓" else "برمجة",
-                        fontSize = 10.sp
+                item {
+                    FilterChip(
+                        selected = actionMode == "REMOTE",
+                        onClick = { actionMode = "REMOTE" },
+                        enabled = !isBusy,
+                        label = { Text("تحقق بعيد", fontSize = 12.sp) }
                     )
                 }
-                TextButton(
-                    onClick = {
-                        actionMode = if (actionMode == "RESEARCH") "CHAT" else "RESEARCH"
-                    },
-                    enabled = !isBusy,
-                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
-                ) {
-                    Text(
-                        if (actionMode == "RESEARCH") "بحث موثق ✓" else "بحث موثق",
-                        fontSize = 10.sp
+                item {
+                    FilterChip(
+                        selected = actionMode == "CODING",
+                        onClick = { actionMode = "CODING" },
+                        enabled = !isBusy,
+                        label = { Text("برمجة", fontSize = 12.sp) }
+                    )
+                }
+                item {
+                    FilterChip(
+                        selected = actionMode == "RESEARCH",
+                        onClick = { actionMode = "RESEARCH" },
+                        enabled = !isBusy,
+                        label = { Text("بحث موثق", fontSize = 12.sp) }
                     )
                 }
             }

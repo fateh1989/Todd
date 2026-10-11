@@ -18,6 +18,7 @@ import com.todd.core.ai.WebResearchPolicy
 import com.todd.core.ai.WebResearchUnavailableException
 import com.todd.core.ai.WebSourceFetcher
 import com.todd.core.ai.DirectGeminiInteractionClient
+import com.todd.core.ai.GeminiInteractionApiException
 import com.todd.core.ai.DirectToolCall
 import com.todd.core.ai.DirectToolDefinition
 import com.todd.core.ai.FirebaseRuntimeConfig
@@ -127,17 +128,43 @@ class ToddTextAgent(
                 }
                 // A successful model response without citations is not a successful live search.
             }
+            val apiFailure = directResult.exceptionOrNull() as? GeminiInteractionApiException
+            if (apiFailure != null && apiFailure.statusCode in setOf(401, 403, 429)) {
+                // Avoid repeating requests that cannot work with this key or exhausted quota.
+                return@withContext directResult
+            }
             // The richer Interactions/tooling path is optional. If that endpoint,
             // model, grounding, or tool schema is unavailable, normal Todd chat
             // must still work through the already verified generateContent provider.
         }
 
-        if (!FirebaseRuntimeConfig.current().configured) {
-            if (researchRequested) {
-                return@withContext Result.failure(
-                    WebResearchUnavailableException(WebResearchPolicy.noSourcesMessage())
+        if (researchRequested) {
+            // Direct generateContent supports Google Search grounding with the same
+            // saved API key even when Firebase is not configured on the phone.
+            // Never return an ungrounded model answer as verified web research.
+            val groundedResult = aiRouter.cloudProvider.generateText(guidedRequest)
+            val grounded = groundedResult.getOrNull()
+            if (grounded != null && grounded.sources.isNotEmpty()) {
+                return@withContext Result.success(
+                    reviewFetchedEvidence(
+                        question = guidedRequest.prompt,
+                        response = grounded,
+                        directClient = directClient
+                    )
                 )
             }
+            if (!FirebaseRuntimeConfig.current().configured) {
+                val failureDetails = groundedResult.exceptionOrNull()?.message
+                return@withContext Result.failure(
+                    WebResearchUnavailableException(
+                        WebResearchPolicy.noSourcesMessage() +
+                            if (failureDetails.isNullOrBlank()) "" else " ($failureDetails)"
+                    )
+                )
+            }
+        }
+
+        if (!FirebaseRuntimeConfig.current().configured) {
             return@withContext aiRouter.route(guidedRequest, mode)
         }
 
