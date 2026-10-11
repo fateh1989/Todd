@@ -1,0 +1,53 @@
+name: Vendor prompts.chat for Todd (one-time offline snapshot)
+
+on:
+  push:
+    branches:
+      - feature/todd-prompt-library
+    paths:
+      - scripts/vendor_prompts.py
+      - .github/workflows/vendor-prompts.yml
+
+permissions:
+  contents: write
+
+jobs:
+  vendor:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout existing feature branch
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+      - name: Python runtime
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Import verified upstream CSV into Android assets
+        run: python3 scripts/vendor_prompts.py
+      - name: Validate generated offline files
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          base = Path('app/src/main/assets')
+          manifest = json.loads((base / 'todd_prompts_manifest.json').read_text(encoding='utf-8'))
+          lines = (base / 'todd_prompts.tsv').read_text(encoding='utf-8').splitlines()
+          assert 150 <= manifest['total_selected'] <= 200
+          assert len(lines) == manifest['total_selected'] + 1
+          assert all(row.count('\t') == 3 for row in lines[1:])
+          assert all(len(row) <= 10000 for row in lines[1:])
+          print('Verified offline prompt entries:', manifest['total_selected'])
+          PY
+      - name: Commit assets to the same feature branch
+        run: |
+          set -euo pipefail
+          git add app/src/main/assets/todd_prompts.tsv app/src/main/assets/todd_prompts_manifest.json
+          if git diff --cached --quiet; then
+            echo "No asset changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "data(todd): vendor verified CC0 prompt snapshot for offline Android"
+          git push origin "HEAD:${GITHUB_REF_NAME}"

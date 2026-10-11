@@ -31,6 +31,7 @@ import com.todd.core.agent.AutonomousTaskCoordinator
 import com.todd.core.agent.AndroidAutonomousCheckpointStore
 import com.todd.core.agent.AutonomousCheckpointStore
 import com.todd.core.agent.ToddTextAgent
+import com.todd.core.agent.ToddPromptLibrary
 import com.todd.core.diagnostics.ToddDiagnostics
 import com.todd.core.model.Project
 import com.todd.core.model.TaskStatus
@@ -294,7 +295,8 @@ class ToddApplication : Application() {
             taskScheduler = taskScheduler,
             stateMachine = stateMachine,
             rulesEngine = rulesEngine,
-            directInteractionClient = directGeminiInteractionClient
+            directInteractionClient = directGeminiInteractionClient,
+            promptLibrary = ToddPromptLibrary(this)
         )
         diagnostics = ToddDiagnostics(
             context = this,
