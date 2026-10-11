@@ -38,8 +38,15 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.lifecycleScope
@@ -364,7 +371,7 @@ fun ToddMainScreen(
                         }
                     },
                     onToggleVoiceMute = { app.liveClient.toggleMute() },
-                    onSendMessage = { message, translationMode ->
+                    onSendMessage = { message, translationMode, researchMode ->
                         if (message.isNotBlank() && !isChatBusy) {
                             scope.launch {
                                 isChatBusy = true
@@ -397,7 +404,8 @@ fun ToddMainScreen(
                                         },
                                         projectContext = contextBeforeMessage,
                                         screenContext = DeviceContextProvider.currentTextContext().ifBlank { null },
-                                        screenImagePath = ScreenCaptureStore.latestFile()?.absolutePath
+                                        screenImagePath = ScreenCaptureStore.latestFile()?.absolutePath,
+                                        webResearch = researchMode
                                     ),
                                     state.aiMode
                                 )
@@ -905,6 +913,48 @@ fun StatusCard(state: ToddState, onStartOverlay: () -> Unit) {
 }
 
 @Composable
+private fun MessageTextWithLinks(text: String) {
+    val uriHandler = LocalUriHandler.current
+    val linkedText = remember(text) {
+        buildAnnotatedString {
+            var cursor = 0
+            URL_PATTERN.findAll(text).forEach { match ->
+                append(text.substring(cursor, match.range.first))
+                val url = match.value.trimEnd('.', ',', ';', ')', ']', '}', '،', '؛')
+                if (url.isBlank()) {
+                    append(match.value)
+                } else {
+                    pushStringAnnotation(tag = "URL", annotation = url)
+                    withStyle(
+                        SpanStyle(
+                            color = Color(0xFF93C5FD),
+                            textDecoration = TextDecoration.Underline
+                        )
+                    ) { append(url) }
+                    pop()
+                    append(match.value.removePrefix(url))
+                }
+                cursor = match.range.last + 1
+            }
+            append(text.substring(cursor))
+        }
+    }
+
+    ClickableText(
+        text = linkedText,
+        modifier = Modifier.padding(12.dp),
+        style = TextStyle(color = Color.White),
+        onClick = { offset ->
+            linkedText.getStringAnnotations("URL", offset, offset)
+                .firstOrNull()
+                ?.let { annotation -> runCatching { uriHandler.openUri(annotation.item) } }
+        }
+    )
+}
+
+private val URL_PATTERN = Regex("https?://[^\\s<>\\\"']+")
+
+@Composable
 fun HomeDashboard(
     state: ToddState,
     messages: List<MemoryEntry>,
@@ -917,7 +967,7 @@ fun HomeDashboard(
     onGeminiModelChange: (GeminiCloudModel) -> Unit,
     onToggleVoice: () -> Unit,
     onToggleVoiceMute: () -> Unit,
-    onSendMessage: (String, Boolean) -> Unit,
+    onSendMessage: (String, Boolean, Boolean) -> Unit,
     onTaskAction: (String, String) -> Unit,
     onAutonomousCodingTask: (String, String) -> Unit
 ) {
@@ -935,7 +985,11 @@ fun HomeDashboard(
         when (actionMode) {
             "REMOTE" -> onTaskAction(text, text)
             "CODING" -> onAutonomousCodingTask(text, text)
-            else -> onSendMessage(text, actionMode == "TRANSLATION")
+            else -> onSendMessage(
+                text,
+                actionMode == "TRANSLATION",
+                actionMode == "RESEARCH"
+            )
         }
         quickInput = ""
     }
@@ -1002,11 +1056,7 @@ fun HomeDashboard(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth(0.98f)
                     ) {
-                        Text(
-                            text = message.value,
-                            color = Color.White,
-                            modifier = Modifier.padding(12.dp)
-                        )
+                        MessageTextWithLinks(message.value)
                     }
                 }
             }
@@ -1060,6 +1110,18 @@ fun HomeDashboard(
                         fontSize = 10.sp
                     )
                 }
+                TextButton(
+                    onClick = {
+                        actionMode = if (actionMode == "RESEARCH") "CHAT" else "RESEARCH"
+                    },
+                    enabled = !isBusy,
+                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
+                ) {
+                    Text(
+                        if (actionMode == "RESEARCH") "بحث موثق ✓" else "بحث موثق",
+                        fontSize = 10.sp
+                    )
+                }
             }
 
             OutlinedTextField(
@@ -1071,6 +1133,7 @@ fun HomeDashboard(
                             "TRANSLATION" -> "اكتب النص للترجمة..."
                             "REMOTE" -> "اكتب ما تريد التحقق منه..."
                             "CODING" -> "اكتب مهمة البرمجة..."
+                            "RESEARCH" -> "اكتب سؤال البحث والمكان أو الفترة المطلوبة..."
                             else -> "اكتب لتود..."
                         }
                     )

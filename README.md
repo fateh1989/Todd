@@ -75,6 +75,20 @@ Routing logic:
 
 Cloud free tiers are optional bonuses, never a dependency.
 
+### Web research
+
+- The chat has an explicit **بحث موثق** mode; ordinary chat does not expose the web-search tool.
+- Research requests use Gemini Google Search grounding and must return source URLs. Todd reports a
+  research failure when no cited sources are returned instead of presenting model memory as live
+  research.
+- Research instructions ask for primary sources, comparison where available, dates, uncertainty,
+  and the user's stated region or time period. Todd does not infer or transmit device location.
+- Source URLs are shown in the answer, open when tapped, and are saved with scheduled research
+  results. The returned URLs are not an independent verification that each page's contents support
+  every claim; full page fetching and claim-by-claim evidence checks remain future work.
+- Live web research requires a cloud-enabled AI mode. **Local Only** explains this and does not send
+  the research request to the network.
+
 ## Memory and project state
 
 Keep the primary memory on-device.

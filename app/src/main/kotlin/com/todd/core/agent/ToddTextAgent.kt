@@ -14,6 +14,8 @@ import com.todd.core.ai.AIRequest
 import com.todd.core.ai.AIResponse
 import com.todd.core.ai.AIRouter
 import com.todd.core.ai.AISource
+import com.todd.core.ai.WebResearchPolicy
+import com.todd.core.ai.WebResearchUnavailableException
 import com.todd.core.ai.DirectGeminiInteractionClient
 import com.todd.core.ai.DirectToolCall
 import com.todd.core.ai.DirectToolDefinition
@@ -67,8 +69,15 @@ class ToddTextAgent(
         request: AIRequest,
         mode: AIProviderMode
     ): Result<AIResponse> = withContext(Dispatchers.IO) {
-        val guidedRequest = promptLibrary?.enrich(request) ?: request
+        val researchRequested = WebResearchPolicy.isRequested(request)
+        val researchAwareRequest = request.copy(webResearch = researchRequested)
+        val guidedRequest = promptLibrary?.enrich(researchAwareRequest) ?: researchAwareRequest
         if (mode == AIProviderMode.LOCAL_ONLY) {
+            if (researchRequested) {
+                return@withContext Result.failure(
+                    WebResearchUnavailableException(WebResearchPolicy.localOnlyMessage())
+                )
+            }
             return@withContext aiRouter.route(guidedRequest, mode)
         }
 
@@ -83,7 +92,11 @@ class ToddTextAgent(
                 maxToolRounds = MAX_TOOL_ROUNDS
             )
             if (directResult.isSuccess) {
-                return@withContext directResult
+                val result = directResult.getOrThrow()
+                if (!researchRequested || result.sources.isNotEmpty()) {
+                    return@withContext Result.success(result)
+                }
+                // A successful model response without citations is not a successful live search.
             }
             // The richer Interactions/tooling path is optional. If that endpoint,
             // model, grounding, or tool schema is unavailable, normal Todd chat
@@ -91,6 +104,11 @@ class ToddTextAgent(
         }
 
         if (!FirebaseRuntimeConfig.current().configured) {
+            if (researchRequested) {
+                return@withContext Result.failure(
+                    WebResearchUnavailableException(WebResearchPolicy.noSourcesMessage())
+                )
+            }
             return@withContext aiRouter.route(guidedRequest, mode)
         }
 
@@ -102,10 +120,10 @@ class ToddTextAgent(
                 backend = GenerativeBackend.googleAI()
             ).generativeModel(
                 modelName = modelName,
-                tools = listOf(
-                    Tool.googleSearch(),
-                    Tool.functionDeclarations(toolDeclarations())
-                )
+                tools = buildList {
+                    if (researchRequested) add(Tool.googleSearch())
+                    add(Tool.functionDeclarations(toolDeclarations()))
+                }
             )
             val chat = model.startChat()
 
@@ -136,6 +154,12 @@ class ToddTextAgent(
                         ?.distinctBy { it.url }
                         .orEmpty()
 
+                    if (researchRequested && sources.isEmpty()) {
+                        return@withContext Result.failure(
+                            WebResearchUnavailableException(WebResearchPolicy.noSourcesMessage())
+                        )
+                    }
+
                     return@withContext Result.success(
                         AIResponse(
                             text = text,
@@ -165,6 +189,13 @@ class ToddTextAgent(
                 )
             )
         } catch (e: Exception) {
+            if (researchRequested) {
+                return@withContext Result.failure(
+                    WebResearchUnavailableException(
+                        "${WebResearchPolicy.noSourcesMessage()} (${e.message ?: "خطأ غير معروف"})"
+                    )
+                )
+            }
             val fallback = aiRouter.route(guidedRequest, mode)
             if (fallback.isSuccess) fallback else Result.failure(e)
         }
@@ -201,6 +232,10 @@ class ToddTextAgent(
                 "Use tools when they provide real evidence or when the user's request asks for an action. " +
                 "Never say an external action succeeded unless a tool result proves it."
         )
+        if (request.webResearch) {
+            appendLine()
+            appendLine(WebResearchPolicy.instructions())
+        }
         request.systemPrompt?.let { appendLine("System: $it") }
         request.projectContext?.let {
             appendLine()

@@ -24,6 +24,8 @@ data class AIRequest(
     val screenContext: String? = null,
     val screenImagePath: String? = null,
     val projectContext: String? = null,
+    /** True only when the user explicitly asks for current information from the web. */
+    val webResearch: Boolean = false,
     val temperature: Float = 0.7f,
     val maxTokens: Int = 1024
 )

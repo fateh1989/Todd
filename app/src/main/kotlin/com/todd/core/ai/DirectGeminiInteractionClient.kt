@@ -66,7 +66,7 @@ class DirectGeminiInteractionClient(
 
             val modelName = modelNameProvider()
             val startedAt = System.currentTimeMillis()
-            val toolPayload = buildToolPayload(tools)
+            val toolPayload = buildToolPayload(tools, includeWebSearch = request.webResearch)
             var totalTokens = 0
             val allSources = linkedMapOf<String, AISource>()
 
@@ -165,19 +165,21 @@ class DirectGeminiInteractionClient(
         }
     }
 
-    private fun buildToolPayload(definitions: List<DirectToolDefinition>): JSONArray =
-        JSONArray().apply {
-            put(JSONObject().put("type", "google_search"))
-            definitions.forEach { definition ->
-                put(
-                    JSONObject()
-                        .put("type", "function")
-                        .put("name", definition.name)
-                        .put("description", definition.description)
-                        .put("parameters", definition.parameters)
-                )
-            }
+    private fun buildToolPayload(
+        definitions: List<DirectToolDefinition>,
+        includeWebSearch: Boolean
+    ): JSONArray = JSONArray().apply {
+        if (includeWebSearch) put(JSONObject().put("type", "google_search"))
+        definitions.forEach { definition ->
+            put(
+                JSONObject()
+                    .put("type", "function")
+                    .put("name", definition.name)
+                    .put("description", definition.description)
+                    .put("parameters", definition.parameters)
+            )
         }
+    }
 
     private fun buildInitialInput(request: AIRequest, prompt: String): Any {
         val imagePath = request.screenImagePath
