@@ -14,12 +14,15 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.job
+import kotlinx.coroutines.Job
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayInputStream
 import java.net.InetAddress
 import java.net.URI
-import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Real Android WebView engine based on Chromium for rendering dynamic JavaScript/SPA pages,
@@ -36,14 +39,13 @@ class AndroidChromiumPageRenderer(
     private val context: Context
 ) : ChromiumPageRenderer {
 
-    private val isDestroyed = AtomicBoolean(false)
+    // Track only active renders. Cleaning one session must not disable future searches.
+    private val activeRenderJobs = ConcurrentHashMap.newKeySet<Job>()
 
     override suspend fun renderAndExtract(
         url: String,
         timeoutMs: Long
     ): ChromiumRenderResult? {
-        if (isDestroyed.get()) return null
-
         // Validate scheme and check against SSRF before creating WebView
         if (!isSafePublicUrl(url)) {
             return ChromiumRenderResult(
@@ -55,7 +57,10 @@ class AndroidChromiumPageRenderer(
             )
         }
 
-        return withContext(Dispatchers.Main) {
+        val renderJob = currentCoroutineContext().job
+        activeRenderJobs.add(renderJob)
+        return try {
+            withContext(Dispatchers.Main) {
             var webView: WebView? = null
             try {
                 withTimeoutOrNull(timeoutMs) {
@@ -173,11 +178,17 @@ class AndroidChromiumPageRenderer(
                 // Ensure immediate and complete cleanup of the WebView instance
                 cleanupWebView(webView)
             }
+            }
+        } finally {
+            activeRenderJobs.remove(renderJob)
         }
     }
 
     override fun destroy() {
-        isDestroyed.set(true)
+        // Stop current pages, but keep this renderer reusable for future searches.
+        activeRenderJobs.toList().forEach { activeJob ->
+            activeJob.cancel(CancellationException("Web research browsing cancelled"))
+        }
     }
 
     @SuppressLint("SetJavaScriptEnabled")

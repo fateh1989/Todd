@@ -61,6 +61,8 @@ import com.todd.core.ai.FirebaseRuntimeConfig
 import com.todd.core.ai.LocalOnDeviceAIProvider
 import com.todd.core.ai.GeminiCloudModel
 import com.todd.core.ai.GeminiUsageSnapshot
+import com.todd.core.ai.WebAgentLogEvent
+import com.todd.core.ai.WebResearchPolicy
 import com.todd.core.remote.RemoteExecutionMode
 import com.todd.core.rules.ActionCategory
 import com.todd.core.remote.RemoteJobRequest
@@ -75,6 +77,8 @@ import com.todd.service.screen.ScreenCaptureService
 import com.todd.service.screen.ScreenCaptureStore
 import com.todd.service.context.DeviceContextProvider
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.job
 
 class MainActivity : ComponentActivity() {
 
@@ -216,6 +220,8 @@ fun ToddMainScreen(
     val liveMuted by app.liveClient.isMuted.collectAsState()
     val visualScreen by ScreenCaptureStore.state.collectAsState()
     val geminiUsage by app.geminiUsageTracker.usage.collectAsState()
+    val webResearchEvents by app.webAgentLogStore.events.collectAsState()
+    val webResearchActive by app.webAgentLogStore.isResearchActive.collectAsState()
     val activeRules by app.repository.getActiveRules().collectAsState(initial = emptyList())
     val scope = rememberCoroutineScope()
 
@@ -360,6 +366,9 @@ fun ToddMainScreen(
                     voiceMuted = liveMuted,
                     selectedGeminiModel = selectedGeminiModel,
                     geminiUsage = geminiUsage,
+                    webResearchEvents = webResearchEvents,
+                    webResearchActive = webResearchActive,
+                    onStopResearch = { app.webAgentLogStore.cancelCurrentResearch() },
                     onGeminiModelChange = { model ->
                         app.geminiModelPreferenceStore.set(model)
                         selectedGeminiModel = model
@@ -378,6 +387,21 @@ fun ToddMainScreen(
                         if (message.isNotBlank() && !isChatBusy) {
                             scope.launch {
                                 isChatBusy = true
+                                val researchJob = if (researchMode || WebResearchPolicy.isRequested(message)) {
+                                    currentCoroutineContext().job
+                                } else null
+                                if (researchJob != null) {
+                                    app.webAgentLogStore.clearLogs()
+                                    app.webAgentLogStore.bindCurrentJob(researchJob)
+                                    app.webAgentLogStore.onLogEvent(
+                                        WebAgentLogEvent(
+                                            phase = "SEARCH",
+                                            query = message,
+                                            details = "بدأ البحث على الإنترنت: $message"
+                                        )
+                                    )
+                                }
+                                try {
                                 val now = System.currentTimeMillis()
                                 val contextBeforeMessage = app.repository.buildProjectContext(projectId)
 
@@ -469,7 +493,10 @@ fun ToddMainScreen(
                                         )
                                     )
                                 }
-                                isChatBusy = false
+                                } finally {
+                                    researchJob?.let(app.webAgentLogStore::markCompleted)
+                                    isChatBusy = false
+                                }
                             }
                         }
                     },
@@ -977,6 +1004,9 @@ fun HomeDashboard(
     voiceMuted: Boolean,
     selectedGeminiModel: GeminiCloudModel,
     geminiUsage: GeminiUsageSnapshot,
+    webResearchEvents: List<WebAgentLogEvent>,
+    webResearchActive: Boolean,
+    onStopResearch: () -> Unit,
     onGeminiModelChange: (GeminiCloudModel) -> Unit,
     onToggleVoice: () -> Unit,
     onToggleVoiceMute: () -> Unit,
@@ -987,6 +1017,10 @@ fun HomeDashboard(
     var quickInput by remember { mutableStateOf("") }
     var actionMode by remember { mutableStateOf("CHAT") }
     var composerFocused by remember { mutableStateOf(false) }
+    var researchLogExpanded by remember { mutableStateOf(false) }
+    LaunchedEffect(webResearchActive) {
+        if (webResearchActive) researchLogExpanded = true
+    }
     val clipboard = LocalClipboardManager.current
     val failedLastMessage = messages.lastOrNull()?.takeIf {
         it.provenance == "SYSTEM" && it.value.startsWith("تعذر إكمال الطلب الآن:")
@@ -1057,6 +1091,49 @@ fun HomeDashboard(
             )
         }
         Spacer(modifier = Modifier.height(8.dp))
+
+        // Actual Android research events, not the separate web simulator's mock results.
+        if (webResearchActive || webResearchEvents.isNotEmpty()) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                TextButton(onClick = { researchLogExpanded = !researchLogExpanded }) {
+                    Text(
+                        (if (researchLogExpanded) "إخفاء سجل البحث" else "عرض سجل البحث") +
+                            " (${webResearchEvents.size})",
+                        fontSize = 12.sp
+                    )
+                }
+                if (webResearchActive) {
+                    TextButton(onClick = onStopResearch) {
+                        Icon(Icons.Default.Stop, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text("إيقاف البحث", fontSize = 12.sp)
+                    }
+                }
+            }
+            if (researchLogExpanded && webResearchEvents.isNotEmpty()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(max = 148.dp)
+                        .background(Color(0xFF1E293B), RoundedCornerShape(8.dp))
+                        .verticalScroll(rememberScrollState())
+                        .padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    webResearchEvents.takeLast(15).asReversed().forEach { event ->
+                        Text(
+                            text = "${event.phase}: ${event.details}",
+                            fontSize = 11.sp,
+                            color = if (event.phase == "FAILURE") Color(0xFFFCA5A5) else Color(0xFFE2E8F0)
+                        )
+                    }
+                }
+            }
+        }
 
         LazyColumn(
             state = chatListState,

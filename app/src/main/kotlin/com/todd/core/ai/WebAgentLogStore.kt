@@ -41,9 +41,12 @@ class WebAgentLogStore : WebAgentLogListener {
         _isResearchActive.value = true
     }
 
-    fun markCompleted() {
-        currentActiveJob = null
-        _isResearchActive.value = false
+    fun markCompleted(job: Job) {
+        // A cancelled previous request must not clear a newer search's active state.
+        if (currentActiveJob === job) {
+            currentActiveJob = null
+            _isResearchActive.value = false
+        }
     }
 
     override fun onLogEvent(event: WebAgentLogEvent) {
