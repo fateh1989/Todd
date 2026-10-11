@@ -15,9 +15,8 @@ Complete Todd as a native Android-first persistent personal AI agent with text/v
 
 ## Active review branch — web research
 - Branch: `codex/research-agent` (separate from `main`).
-- Existing branch commit: `0192e06340709a9e710e592c52c645901be0e213` before the source-page evidence follow-up.
 - The branch adds explicit cited web research, privacy-aware intent handling, URL display, and local
-  source records. The follow-up adds guarded retrieval of up to three cited pages, short excerpts,
+  source records. A follow-up adds guarded retrieval of up to three cited pages, short excerpts,
   an evidence-based answer review, and honest unverified status for source records.
 - No APK is produced for this work unless the owner explicitly requests one.
 - Build and unit tests for this review branch have not passed in this environment because the Android

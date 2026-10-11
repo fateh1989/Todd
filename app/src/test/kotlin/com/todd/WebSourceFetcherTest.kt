@@ -27,6 +27,7 @@ class WebSourceFetcherTest {
         assertTrue(WebSourceFetcher.isNonPublicAddress(InetAddress.getByName("192.168.1.4")))
         assertTrue(WebSourceFetcher.isNonPublicAddress(InetAddress.getByName("169.254.169.254")))
         assertTrue(WebSourceFetcher.isNonPublicAddress(InetAddress.getByName("100.64.0.1")))
+        assertTrue(WebSourceFetcher.isNonPublicAddress(InetAddress.getByName("2001:db8::1")))
         assertFalse(WebSourceFetcher.isNonPublicAddress(InetAddress.getByName("8.8.8.8")))
     }
 }

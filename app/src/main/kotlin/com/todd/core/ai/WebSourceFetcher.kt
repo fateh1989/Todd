@@ -187,11 +187,17 @@ class WebSourceFetcher(
             // RFC 4193 unique local (fc00::/7), link-local, and IPv4-mapped IPv6.
             val first = bytes[0].toInt() and 0xff
             val second = bytes[1].toInt() and 0xff
+            val third = bytes[2].toInt() and 0xff
+            val fourth = bytes[3].toInt() and 0xff
             return first == 0xfc || first == 0xfd ||
                 (first == 0xfe && second and 0xc0 == 0x80) ||
+                (first == 0x20 && second == 0x02) || // 6to4 can embed private IPv4 targets.
+                (first == 0x20 && second == 0x01 && third == 0 && fourth == 0) || // Teredo.
+                (first == 0x00 && second == 0x64 && third == 0xff && fourth == 0x9b) || // NAT64.
                 (first == 0x20 && second == 0x01 &&
                     (bytes[2].toInt() and 0xff) == 0x0d &&
                     (bytes[3].toInt() and 0xff) == 0xb8) ||
+                bytes.take(12).all { it.toInt() == 0 } || // IPv4-compatible IPv6 and unspecified.
                 (bytes.take(10).all { it.toInt() == 0 } &&
                     bytes[10].toInt() == -1 && bytes[11].toInt() == -1)
         }
