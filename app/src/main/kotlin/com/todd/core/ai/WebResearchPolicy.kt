@@ -61,6 +61,11 @@ object WebResearchPolicy {
         "قارن", "مقارنة", "تحقق من", "مصادر", "ابحث عن", "معلومات حديثة"
     )
 
+    private val ENGLISH_SIGNALS = listOf(
+        "search online", "web search", "search the web", "research this", "do research",
+        "latest news", "current information", "find sources", "look up online"
+    )
+
     fun simplifyQueryForSearch(prompt: String): String {
         var query = prompt.trim()
         val prefixesToRemove = listOf(

@@ -40,6 +40,7 @@ import com.todd.service.recovery.AutonomousRecoveryScheduler
 import com.todd.core.ai.AndroidChromiumPageRenderer
 import com.todd.core.ai.WebAgentLogStore
 import com.todd.core.ai.WebSourceFetcher
+import com.todd.core.scheduler.ToddTaskScheduler
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
