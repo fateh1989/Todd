@@ -54,6 +54,8 @@ def run():
     if blob_sha != UPSTREAM_BLOB:
         raise RuntimeError("Upstream CSV bytes differ from pinned Git blob; refusing unverified import")
 
+    # Upstream contains long quoted prompts; Python CSV defaults to 128 KiB per field.
+    csv.field_size_limit(20 * 1024 * 1024)
     data = list(csv.DictReader(io.StringIO(payload.decode("utf-8-sig"), newline="")))
     if not data or not {"act", "prompt"}.issubset(data[0]):
         raise RuntimeError("Expected act,prompt columns in official prompts.csv")
