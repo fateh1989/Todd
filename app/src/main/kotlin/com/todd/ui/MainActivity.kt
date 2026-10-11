@@ -19,6 +19,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -31,6 +32,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
@@ -38,8 +40,16 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.ClickableText
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.core.content.ContextCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.lifecycleScope
@@ -364,7 +374,7 @@ fun ToddMainScreen(
                         }
                     },
                     onToggleVoiceMute = { app.liveClient.toggleMute() },
-                    onSendMessage = { message, translationMode ->
+                    onSendMessage = { message, translationMode, researchMode ->
                         if (message.isNotBlank() && !isChatBusy) {
                             scope.launch {
                                 isChatBusy = true
@@ -397,7 +407,8 @@ fun ToddMainScreen(
                                         },
                                         projectContext = contextBeforeMessage,
                                         screenContext = DeviceContextProvider.currentTextContext().ifBlank { null },
-                                        screenImagePath = ScreenCaptureStore.latestFile()?.absolutePath
+                                        screenImagePath = ScreenCaptureStore.latestFile()?.absolutePath,
+                                        webResearch = researchMode
                                     ),
                                     state.aiMode
                                 )
@@ -416,6 +427,10 @@ fun ToddMainScreen(
                                                 append(source.title ?: source.domain ?: "مصدر")
                                                 append(" — ")
                                                 appendLine(source.url)
+                                                source.excerpt?.let { excerpt ->
+                                                    appendLine("   مقتطف من الصفحة (للمراجعة، وليس تحققًا كاملًا):")
+                                                    appendLine("   ${excerpt.take(700)}")
+                                                }
                                             }
                                         }
                                     }.trim()
@@ -448,7 +463,9 @@ fun ToddMainScreen(
                                                 append(source.url)
                                             },
                                             provenance = "TOOL",
-                                            isVerified = true
+                                            // A search citation or fetched excerpt is evidence to inspect,
+                                            // not proof that every saved claim is correct.
+                                            isVerified = false
                                         )
                                     )
                                 }
@@ -905,6 +922,52 @@ fun StatusCard(state: ToddState, onStartOverlay: () -> Unit) {
 }
 
 @Composable
+private fun MessageTextWithLinks(text: String) {
+    val uriHandler = LocalUriHandler.current
+    val linkedText = remember(text) {
+        buildAnnotatedString {
+            var cursor = 0
+            URL_PATTERN.findAll(text).forEach { match ->
+                append(text.substring(cursor, match.range.first))
+                val url = match.value.trimEnd('.', ',', ';', ')', ']', '}', '،', '؛')
+                if (url.isBlank()) {
+                    append(match.value)
+                } else {
+                    pushStringAnnotation(tag = "URL", annotation = url)
+                    withStyle(
+                        SpanStyle(
+                            color = Color(0xFF93C5FD),
+                            textDecoration = TextDecoration.Underline
+                        )
+                    ) { append(url) }
+                    pop()
+                    append(match.value.removePrefix(url))
+                }
+                cursor = match.range.last + 1
+            }
+            append(text.substring(cursor))
+        }
+    }
+
+    ClickableText(
+        text = linkedText,
+        modifier = Modifier.padding(12.dp),
+        style = TextStyle(color = Color.White),
+        onClick = { offset ->
+            linkedText.getStringAnnotations("URL", offset, offset)
+                .firstOrNull()
+                ?.let { annotation -> runCatching { uriHandler.openUri(annotation.item) } }
+        }
+    )
+}
+
+private val URL_PATTERN = Regex("https?://[^\\s<>\\\"']+")
+
+/** A single research request must not make later ordinary chat messages web searches. */
+internal fun nextActionModeAfterSubmission(mode: String): String =
+    if (mode == "RESEARCH") "CHAT" else mode
+
+@Composable
 fun HomeDashboard(
     state: ToddState,
     messages: List<MemoryEntry>,
@@ -917,13 +980,18 @@ fun HomeDashboard(
     onGeminiModelChange: (GeminiCloudModel) -> Unit,
     onToggleVoice: () -> Unit,
     onToggleVoiceMute: () -> Unit,
-    onSendMessage: (String, Boolean) -> Unit,
+    onSendMessage: (String, Boolean, Boolean) -> Unit,
     onTaskAction: (String, String) -> Unit,
     onAutonomousCodingTask: (String, String) -> Unit
 ) {
     var quickInput by remember { mutableStateOf("") }
     var actionMode by remember { mutableStateOf("CHAT") }
     var composerFocused by remember { mutableStateOf(false) }
+    val clipboard = LocalClipboardManager.current
+    val failedLastMessage = messages.lastOrNull()?.takeIf {
+        it.provenance == "SYSTEM" && it.value.startsWith("تعذر إكمال الطلب الآن:")
+    }
+    val lastUserMessage = messages.lastOrNull { it.key.startsWith("chat:user:") }
     val chatListState = rememberLazyListState()
     val density = LocalDensity.current
     val imeVisible = WindowInsets.ime.getBottom(density) > 0
@@ -932,12 +1000,18 @@ fun HomeDashboard(
         val text = quickInput.trim()
         if (text.isBlank() || isBusy) return
 
-        when (actionMode) {
+        val submittedMode = actionMode
+        when (submittedMode) {
             "REMOTE" -> onTaskAction(text, text)
             "CODING" -> onAutonomousCodingTask(text, text)
-            else -> onSendMessage(text, actionMode == "TRANSLATION")
+            else -> onSendMessage(
+                text,
+                submittedMode == "TRANSLATION",
+                submittedMode == "RESEARCH"
+            )
         }
         quickInput = ""
+        actionMode = nextActionModeAfterSubmission(submittedMode)
     }
 
     // Entering the chat, receiving a new message, or starting a reply should show
@@ -1002,11 +1076,22 @@ fun HomeDashboard(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth(0.98f)
                     ) {
-                        Text(
-                            text = message.value,
-                            color = Color.White,
-                            modifier = Modifier.padding(12.dp)
-                        )
+                        Row(verticalAlignment = Alignment.Top) {
+                            Box(modifier = Modifier.weight(1f)) {
+                                MessageTextWithLinks(message.value)
+                            }
+                            IconButton(
+                                onClick = { clipboard.setText(AnnotatedString(message.value)) },
+                                modifier = Modifier.size(36.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.ContentCopy,
+                                    contentDescription = "نسخ الرسالة",
+                                    tint = Color(0xFFCBD5E1),
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -1020,44 +1105,61 @@ fun HomeDashboard(
         Column(
             modifier = Modifier.fillMaxWidth()
         ) {
-            Row(
+            if (failedLastMessage != null && lastUserMessage != null) {
+                TextButton(
+                    onClick = { quickInput = lastUserMessage.value },
+                    enabled = !isBusy,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                ) {
+                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text("استعادة الطلب الذي فشل", fontSize = 12.sp)
+                }
+            }
+
+            // Scrollable, readable action chips instead of four tiny labels.
+            LazyRow(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(2.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                TextButton(
-                    onClick = {
-                        actionMode = if (actionMode == "TRANSLATION") "CHAT" else "TRANSLATION"
-                    },
-                    enabled = !isBusy,
-                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
-                ) {
-                    Text(
-                        if (actionMode == "TRANSLATION") "محادثة الترجمة ✓" else "محادثة الترجمة",
-                        fontSize = 10.sp
+                item {
+                    FilterChip(
+                        selected = actionMode == "CHAT",
+                        onClick = { actionMode = "CHAT" },
+                        enabled = !isBusy,
+                        label = { Text("محادثة", fontSize = 12.sp) }
                     )
                 }
-                TextButton(
-                    onClick = {
-                        actionMode = if (actionMode == "REMOTE") "CHAT" else "REMOTE"
-                    },
-                    enabled = !isBusy,
-                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
-                ) {
-                    Text(
-                        if (actionMode == "REMOTE") "تحقق بعيد ✓" else "تحقق بعيد",
-                        fontSize = 10.sp
+                item {
+                    FilterChip(
+                        selected = actionMode == "TRANSLATION",
+                        onClick = { actionMode = "TRANSLATION" },
+                        enabled = !isBusy,
+                        label = { Text("محادثة الترجمة", fontSize = 12.sp) }
                     )
                 }
-                TextButton(
-                    onClick = {
-                        actionMode = if (actionMode == "CODING") "CHAT" else "CODING"
-                    },
-                    enabled = !isBusy,
-                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
-                ) {
-                    Text(
-                        if (actionMode == "CODING") "برمجة ✓" else "برمجة",
-                        fontSize = 10.sp
+                item {
+                    FilterChip(
+                        selected = actionMode == "REMOTE",
+                        onClick = { actionMode = "REMOTE" },
+                        enabled = !isBusy,
+                        label = { Text("تحقق بعيد", fontSize = 12.sp) }
+                    )
+                }
+                item {
+                    FilterChip(
+                        selected = actionMode == "CODING",
+                        onClick = { actionMode = "CODING" },
+                        enabled = !isBusy,
+                        label = { Text("برمجة", fontSize = 12.sp) }
+                    )
+                }
+                item {
+                    FilterChip(
+                        selected = actionMode == "RESEARCH",
+                        onClick = { actionMode = "RESEARCH" },
+                        enabled = !isBusy,
+                        label = { Text("بحث موثق", fontSize = 12.sp) }
                     )
                 }
             }
@@ -1071,6 +1173,7 @@ fun HomeDashboard(
                             "TRANSLATION" -> "اكتب النص للترجمة..."
                             "REMOTE" -> "اكتب ما تريد التحقق منه..."
                             "CODING" -> "اكتب مهمة البرمجة..."
+                            "RESEARCH" -> "اكتب سؤال البحث والمكان أو الفترة المطلوبة..."
                             else -> "اكتب لتود..."
                         }
                     )

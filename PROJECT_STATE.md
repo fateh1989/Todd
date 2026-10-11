@@ -1,6 +1,6 @@
 # Todd — Project State
 
-Last refresh: 2026-10-05
+Last refresh: 2026-10-11
 
 ## Goal
 Complete Todd as a native Android-first persistent personal AI agent with text/voice, screen context, durable memory, live research, GitHub tools, autonomous coding, scheduling, and reconnectable remote verification.
@@ -12,6 +12,15 @@ Complete Todd as a native Android-first persistent personal AI agent with text/v
 - Commit message: fix(release): use one bundle in stable release
 - Canonical product definition: TODD_MASTER_SPEC.md
 - Google AI Studio continuation: GOOGLE_AI_STUDIO_BUILD_PROMPT.md
+
+## Active review branch — web research
+- Branch: `codex/research-agent` (separate from `main`).
+- The branch adds explicit cited web research, privacy-aware intent handling, URL display, and local
+  source records. A follow-up adds guarded retrieval of up to three cited pages, short excerpts,
+  an evidence-based answer review, and honest unverified status for source records.
+- No APK is produced for this work unless the owner explicitly requests one.
+- Build and unit tests for this review branch have not passed in this environment because the Android
+  SDK is not installed; any source-page fetch behavior also needs a real-device/network check.
 
 ## Latest completed CI evidence
 - GitHub Actions secret configured: `TODD_SIGNING_BUNDLE` (single bundle containing all signing material).
@@ -84,3 +93,11 @@ CI verified, physical-device verification pending:
 
 ## Verification rule
 Always distinguish proposed, implemented, CI/build verified, and physical-device verified. Never claim success without matching evidence.
+
+## Research feature checkpoint
+- Inspected `main` at `72a888624edaf14d034911d24559e541b66021b6`; GitHub Actions run 152 succeeded on that unchanged main commit.
+- Research changes are isolated on branch `codex/research-agent`; they are not part of `main`.
+- Implemented in that branch: explicit research mode, conditional web-search tool exposure, Arabic/English request detection, citation-required failure behavior, tappable source URLs, and saving scheduled-research sources as unverified source records.
+- Not yet build- or test-verified: this environment has no Android SDK. The unit-test task stopped before compilation with `SDK location not found`.
+- No APK was assembled, signed, uploaded, or released for this checkpoint.
+- Still absent: independently fetching source pages, claim-to-source verification, and automatic device-location lookup. Research uses the existing Gemini web-search integration and does not infer location.

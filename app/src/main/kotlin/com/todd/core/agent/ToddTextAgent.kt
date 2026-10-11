@@ -14,7 +14,11 @@ import com.todd.core.ai.AIRequest
 import com.todd.core.ai.AIResponse
 import com.todd.core.ai.AIRouter
 import com.todd.core.ai.AISource
+import com.todd.core.ai.WebResearchPolicy
+import com.todd.core.ai.WebResearchUnavailableException
+import com.todd.core.ai.WebSourceFetcher
 import com.todd.core.ai.DirectGeminiInteractionClient
+import com.todd.core.ai.GeminiInteractionApiException
 import com.todd.core.ai.DirectToolCall
 import com.todd.core.ai.DirectToolDefinition
 import com.todd.core.ai.FirebaseRuntimeConfig
@@ -60,15 +64,43 @@ class ToddTextAgent(
     private val rulesEngine: RulesEngine,
     private val directInteractionClient: DirectGeminiInteractionClient? = null,
     private val promptLibrary: ToddPromptLibrary? = null,
-    private val modelName: String = "gemini-3.8-flash"
+    private val modelName: String = "gemini-3.8-flash",
+    private val webSourceFetcher: WebSourceFetcher = WebSourceFetcher()
 ) {
 
     suspend fun respond(
         request: AIRequest,
         mode: AIProviderMode
     ): Result<AIResponse> = withContext(Dispatchers.IO) {
-        val guidedRequest = promptLibrary?.enrich(request) ?: request
+        // A simple greeting is a new conversational turn, not an invitation to
+        // resume a previous coding task or disclose persistent device context.
+        // Keep all stored memories intact for requests that actually need them.
+        if (ChatGreetingPolicy.isStandaloneGreeting(request)) {
+            val greetingRequest = request.copy(
+                selectedText = null,
+                screenContext = null,
+                screenImagePath = null,
+                projectContext = null
+            )
+            return@withContext aiRouter.route(greetingRequest, mode)
+        }
+
+        val researchRequested = WebResearchPolicy.isRequested(request)
+        // A web query should not inherit phone-screen or project data (which may reveal
+        // location or identity) unless the user includes it in the query itself.
+        val researchAwareRequest = request.copy(
+            webResearch = researchRequested,
+            screenContext = if (researchRequested) null else request.screenContext,
+            screenImagePath = if (researchRequested) null else request.screenImagePath,
+            projectContext = if (researchRequested) null else request.projectContext
+        )
+        val guidedRequest = promptLibrary?.enrich(researchAwareRequest) ?: researchAwareRequest
         if (mode == AIProviderMode.LOCAL_ONLY) {
+            if (researchRequested) {
+                return@withContext Result.failure(
+                    WebResearchUnavailableException(WebResearchPolicy.localOnlyMessage())
+                )
+            }
             return@withContext aiRouter.route(guidedRequest, mode)
         }
 
@@ -83,11 +115,53 @@ class ToddTextAgent(
                 maxToolRounds = MAX_TOOL_ROUNDS
             )
             if (directResult.isSuccess) {
+                val result = directResult.getOrThrow()
+                if (!researchRequested) return@withContext Result.success(result)
+                if (result.sources.isNotEmpty()) {
+                    return@withContext Result.success(
+                        reviewFetchedEvidence(
+                            question = guidedRequest.prompt,
+                            response = result,
+                            directClient = directClient
+                        )
+                    )
+                }
+                // A successful model response without citations is not a successful live search.
+            }
+            val apiFailure = directResult.exceptionOrNull() as? GeminiInteractionApiException
+            if (apiFailure != null && apiFailure.statusCode in setOf(401, 403, 429)) {
+                // Avoid repeating requests that cannot work with this key or exhausted quota.
                 return@withContext directResult
             }
             // The richer Interactions/tooling path is optional. If that endpoint,
             // model, grounding, or tool schema is unavailable, normal Todd chat
             // must still work through the already verified generateContent provider.
+        }
+
+        if (researchRequested) {
+            // Direct generateContent supports Google Search grounding with the same
+            // saved API key even when Firebase is not configured on the phone.
+            // Never return an ungrounded model answer as verified web research.
+            val groundedResult = aiRouter.cloudProvider.generateText(guidedRequest)
+            val grounded = groundedResult.getOrNull()
+            if (grounded != null && grounded.sources.isNotEmpty()) {
+                return@withContext Result.success(
+                    reviewFetchedEvidence(
+                        question = guidedRequest.prompt,
+                        response = grounded,
+                        directClient = directClient
+                    )
+                )
+            }
+            if (!FirebaseRuntimeConfig.current().configured) {
+                val failureDetails = groundedResult.exceptionOrNull()?.message
+                return@withContext Result.failure(
+                    WebResearchUnavailableException(
+                        WebResearchPolicy.noSourcesMessage() +
+                            if (failureDetails.isNullOrBlank()) "" else " ($failureDetails)"
+                    )
+                )
+            }
         }
 
         if (!FirebaseRuntimeConfig.current().configured) {
@@ -102,10 +176,10 @@ class ToddTextAgent(
                 backend = GenerativeBackend.googleAI()
             ).generativeModel(
                 modelName = modelName,
-                tools = listOf(
-                    Tool.googleSearch(),
-                    Tool.functionDeclarations(toolDeclarations())
-                )
+                tools = buildList {
+                    if (researchRequested) add(Tool.googleSearch())
+                    add(Tool.functionDeclarations(toolDeclarations()))
+                }
             )
             val chat = model.startChat()
 
@@ -136,8 +210,29 @@ class ToddTextAgent(
                         ?.distinctBy { it.url }
                         .orEmpty()
 
+                    if (researchRequested && sources.isEmpty()) {
+                        return@withContext Result.failure(
+                            WebResearchUnavailableException(WebResearchPolicy.noSourcesMessage())
+                        )
+                    }
+
+                    val reviewed = if (researchRequested) {
+                        reviewFetchedEvidence(
+                            question = guidedRequest.prompt,
+                            response = AIResponse(
+                                text = text,
+                                providerUsed = ProviderType.CLOUD_GEMINI,
+                                isVerified = false,
+                                tokensUsed = (prompt.length + text.length) / 4,
+                                latencyMs = System.currentTimeMillis() - startedAt,
+                                sources = sources
+                            ),
+                            firebaseReviewEnabled = true
+                        )
+                    } else null
+
                     return@withContext Result.success(
-                        AIResponse(
+                        reviewed ?: AIResponse(
                             text = text,
                             providerUsed = ProviderType.CLOUD_GEMINI,
                             isVerified = false,
@@ -165,9 +260,66 @@ class ToddTextAgent(
                 )
             )
         } catch (e: Exception) {
+            if (researchRequested) {
+                return@withContext Result.failure(
+                    WebResearchUnavailableException(
+                        "${WebResearchPolicy.noSourcesMessage()} (${e.message ?: "خطأ غير معروف"})"
+                    )
+                )
+            }
             val fallback = aiRouter.route(guidedRequest, mode)
             if (fallback.isSuccess) fallback else Result.failure(e)
         }
+    }
+
+    private suspend fun reviewFetchedEvidence(
+        question: String,
+        response: AIResponse,
+        directClient: DirectGeminiInteractionClient? = null,
+        firebaseReviewEnabled: Boolean = false
+    ): AIResponse {
+        val enrichedSources = try {
+            webSourceFetcher.fetch(response.sources)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            response.sources
+        }
+        if (enrichedSources.none { !it.excerpt.isNullOrBlank() }) {
+            return response.copy(sources = enrichedSources)
+        }
+
+        val reviewedText = try {
+            when {
+                directClient != null -> directClient.reviewResearchEvidence(
+                    question = question,
+                    draft = response.text,
+                    sources = enrichedSources
+                )
+                firebaseReviewEnabled && FirebaseRuntimeConfig.current().configured -> {
+                    Firebase.ai(
+                        app = FirebaseRuntimeConfig.requireConfiguredApp(),
+                        backend = GenerativeBackend.googleAI()
+                    ).generativeModel(modelName = modelName)
+                        .generateContent(
+                            WebResearchPolicy.evidenceReviewPrompt(
+                                question, response.text, enrichedSources
+                            )
+                        ).text
+                }
+                else -> null
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }?.trim()?.takeIf { it.isNotBlank() }
+
+        return response.copy(
+            text = reviewedText ?: response.text,
+            sources = enrichedSources,
+            isVerified = false
+        )
     }
 
     private suspend fun sendInitialMessage(
@@ -201,6 +353,10 @@ class ToddTextAgent(
                 "Use tools when they provide real evidence or when the user's request asks for an action. " +
                 "Never say an external action succeeded unless a tool result proves it."
         )
+        if (request.webResearch) {
+            appendLine()
+            appendLine(WebResearchPolicy.instructions())
+        }
         request.systemPrompt?.let { appendLine("System: $it") }
         request.projectContext?.let {
             appendLine()
