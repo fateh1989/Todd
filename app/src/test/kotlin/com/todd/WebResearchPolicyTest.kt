@@ -19,6 +19,8 @@ class WebResearchPolicyTest {
     fun `ordinary messages do not enable web search`() {
         assertFalse(WebResearchPolicy.isRequested(AIRequest("ترجم هذه الرسالة")))
         assertFalse(WebResearchPolicy.isRequested(AIRequest("اشرح لي معنى كلمة البحث")))
+        assertFalse(WebResearchPolicy.isRequested(AIRequest("مرحبا")))
+        assertFalse(WebResearchPolicy.isRequested(AIRequest("الوو")))
     }
 
     @Test

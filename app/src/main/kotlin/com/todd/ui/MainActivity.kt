@@ -960,6 +960,10 @@ private fun MessageTextWithLinks(text: String) {
 
 private val URL_PATTERN = Regex("https?://[^\\s<>\\\"']+")
 
+/** A single research request must not make later ordinary chat messages web searches. */
+internal fun nextActionModeAfterSubmission(mode: String): String =
+    if (mode == "RESEARCH") "CHAT" else mode
+
 @Composable
 fun HomeDashboard(
     state: ToddState,
@@ -988,16 +992,18 @@ fun HomeDashboard(
         val text = quickInput.trim()
         if (text.isBlank() || isBusy) return
 
-        when (actionMode) {
+        val submittedMode = actionMode
+        when (submittedMode) {
             "REMOTE" -> onTaskAction(text, text)
             "CODING" -> onAutonomousCodingTask(text, text)
             else -> onSendMessage(
                 text,
-                actionMode == "TRANSLATION",
-                actionMode == "RESEARCH"
+                submittedMode == "TRANSLATION",
+                submittedMode == "RESEARCH"
             )
         }
         quickInput = ""
+        actionMode = nextActionModeAfterSubmission(submittedMode)
     }
 
     // Entering the chat, receiving a new message, or starting a reply should show
