@@ -59,6 +59,7 @@ class ToddTextAgent(
     private val stateMachine: ToddStateMachine,
     private val rulesEngine: RulesEngine,
     private val directInteractionClient: DirectGeminiInteractionClient? = null,
+    private val promptLibrary: ToddPromptLibrary? = null,
     private val modelName: String = "gemini-3.8-flash"
 ) {
 
@@ -66,15 +67,16 @@ class ToddTextAgent(
         request: AIRequest,
         mode: AIProviderMode
     ): Result<AIResponse> = withContext(Dispatchers.IO) {
+        val guidedRequest = promptLibrary?.enrich(request) ?: request
         if (mode == AIProviderMode.LOCAL_ONLY) {
-            return@withContext aiRouter.route(request, mode)
+            return@withContext aiRouter.route(guidedRequest, mode)
         }
 
-        val prompt = buildPrompt(request)
+        val prompt = buildPrompt(guidedRequest)
         val directClient = directInteractionClient
         if (directClient != null && directClient.isAvailable()) {
             val directResult = directClient.respond(
-                request = request,
+                request = guidedRequest,
                 prompt = prompt,
                 tools = directToolDefinitions(),
                 executeTool = { call -> executeDirectTool(call) },
@@ -89,7 +91,7 @@ class ToddTextAgent(
         }
 
         if (!FirebaseRuntimeConfig.current().configured) {
-            return@withContext aiRouter.route(request, mode)
+            return@withContext aiRouter.route(guidedRequest, mode)
         }
 
         val startedAt = System.currentTimeMillis()
@@ -107,7 +109,7 @@ class ToddTextAgent(
             )
             val chat = model.startChat()
 
-            var response = sendInitialMessage(chat, prompt, request.screenImagePath)
+            var response = sendInitialMessage(chat, prompt, guidedRequest.screenImagePath)
 
             repeat(MAX_TOOL_ROUNDS) {
                 val calls = response.functionCalls
@@ -163,7 +165,7 @@ class ToddTextAgent(
                 )
             )
         } catch (e: Exception) {
-            val fallback = aiRouter.route(request, mode)
+            val fallback = aiRouter.route(guidedRequest, mode)
             if (fallback.isSuccess) fallback else Result.failure(e)
         }
     }
