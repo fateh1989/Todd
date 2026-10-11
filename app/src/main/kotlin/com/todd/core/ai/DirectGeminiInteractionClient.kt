@@ -49,6 +49,26 @@ class DirectGeminiInteractionClient(
 
     suspend fun isAvailable(): Boolean = !apiKeyProvider().isNullOrBlank()
 
+    /** Re-checks a search draft against fetched page excerpts before Todd presents it. */
+    suspend fun reviewResearchEvidence(
+        question: String,
+        draft: String,
+        sources: List<AISource>
+    ): String? = withContext(Dispatchers.IO) {
+        val evidence = sources.filter { !it.excerpt.isNullOrBlank() }.take(WebSourceFetcher.MAX_SOURCES)
+        if (evidence.isEmpty()) return@withContext null
+
+        val apiKey = apiKeyProvider()?.trim().orEmpty()
+        if (apiKey.isBlank()) return@withContext null
+        val response = postInteraction(
+            apiKey = apiKey,
+            body = JSONObject()
+                .put("model", modelNameProvider())
+                .put("input", WebResearchPolicy.evidenceReviewPrompt(question, draft, evidence))
+        )
+        parseModelText(response).trim().takeIf { it.isNotBlank() }
+    }
+
     suspend fun respond(
         request: AIRequest,
         prompt: String,
@@ -66,7 +86,7 @@ class DirectGeminiInteractionClient(
 
             val modelName = modelNameProvider()
             val startedAt = System.currentTimeMillis()
-            val toolPayload = buildToolPayload(tools)
+            val toolPayload = buildToolPayload(tools, includeWebSearch = request.webResearch)
             var totalTokens = 0
             val allSources = linkedMapOf<String, AISource>()
 
@@ -165,19 +185,21 @@ class DirectGeminiInteractionClient(
         }
     }
 
-    private fun buildToolPayload(definitions: List<DirectToolDefinition>): JSONArray =
-        JSONArray().apply {
-            put(JSONObject().put("type", "google_search"))
-            definitions.forEach { definition ->
-                put(
-                    JSONObject()
-                        .put("type", "function")
-                        .put("name", definition.name)
-                        .put("description", definition.description)
-                        .put("parameters", definition.parameters)
-                )
-            }
+    private fun buildToolPayload(
+        definitions: List<DirectToolDefinition>,
+        includeWebSearch: Boolean
+    ): JSONArray = JSONArray().apply {
+        if (includeWebSearch) put(JSONObject().put("type", "google_search"))
+        definitions.forEach { definition ->
+            put(
+                JSONObject()
+                    .put("type", "function")
+                    .put("name", definition.name)
+                    .put("description", definition.description)
+                    .put("parameters", definition.parameters)
+            )
         }
+    }
 
     private fun buildInitialInput(request: AIRequest, prompt: String): Any {
         val imagePath = request.screenImagePath
@@ -243,7 +265,7 @@ class DirectGeminiInteractionClient(
         return textParts.joinToString("\n")
     }
 
-    private fun parseSources(root: JSONObject): List<AISource> {
+    internal fun parseSources(root: JSONObject): List<AISource> {
         val result = linkedMapOf<String, AISource>()
         val steps = root.optJSONArray("steps") ?: return emptyList()
         for (i in 0 until steps.length()) {
@@ -256,7 +278,13 @@ class DirectGeminiInteractionClient(
                 for (k in 0 until annotations.length()) {
                     val annotation = annotations.optJSONObject(k) ?: continue
                     if (annotation.optString("type") != "url_citation") continue
-                    val url = annotation.optString("url")
+                    // Gemini's Interactions API has returned URL citations as both
+                    // `url` and `uri` across its schema revisions. Accept either so
+                    // a real grounded response is not discarded as source-less.
+                    val url = sequenceOf("url", "uri", "source")
+                        .map { key -> annotation.optString(key).trim() }
+                        .firstOrNull { it.startsWith("https://", ignoreCase = true) || it.startsWith("http://", ignoreCase = true) }
+                        ?: continue
                     if (url.isBlank()) continue
                     result[url] = AISource(
                         title = annotation.optString("title").takeIf { it.isNotBlank() },

@@ -17,6 +17,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.todd.ToddApplication
 import com.todd.core.ai.AIRequest
+import com.todd.core.ai.WebResearchUnavailableException
 import com.todd.core.model.MemoryEntry
 import com.todd.core.model.MemoryLayer
 import com.todd.core.model.ScheduledTask
@@ -191,12 +192,45 @@ class ScheduledTaskWorker(
                         projectId = schedule.projectId,
                         layer = MemoryLayer.TASK,
                         key = "scheduled:${schedule.id}:$now",
-                        value = ai.text,
+                        value = buildString {
+                            append(ai.text)
+                            if (ai.sources.isNotEmpty()) {
+                                appendLine()
+                                appendLine()
+                                appendLine("المصادر التي أعادها البحث:")
+                                ai.sources.forEachIndexed { index, source ->
+                                    append(index + 1).append(". ")
+                                    append(source.title ?: source.domain ?: "مصدر")
+                                    append(" — ").appendLine(source.url)
+                                }
+                            }
+                        },
                         provenance = "MODEL",
                         isVerified = false,
                         timestamp = now
                     )
                 )
+
+                ai.sources.forEachIndexed { index, source ->
+                    repository.saveMemory(
+                        MemoryEntry(
+                            id = "scheduled-source-${schedule.id}-$now-$index",
+                            projectId = schedule.projectId,
+                            layer = MemoryLayer.CONNECTED_SOURCE,
+                            key = "scheduled-source:${schedule.id}:$now:$index",
+                            value = buildString {
+                                append("Returned by web search at ").append(now).append(" | ")
+                                source.title?.let { append(it).append(" | ") }
+                                source.domain?.let { append(it).append(" | ") }
+                                append(source.url)
+                            },
+                            provenance = "TOOL",
+                            // The URL was returned by the search tool; page content was not independently fetched.
+                            isVerified = false,
+                            timestamp = now
+                        )
+                    )
+                }
 
                 repository.updateScheduledTask(
                     schedule.copy(
@@ -235,17 +269,35 @@ class ScheduledTaskWorker(
             },
             onFailure = { error ->
                 val now = System.currentTimeMillis()
+                val blockedForResearchMode = error is WebResearchUnavailableException
+                if (blockedForResearchMode) {
+                    repository.updateScheduledTask(
+                        schedule.copy(enabled = false, updatedAt = now)
+                    )
+                }
                 task?.let {
                     repository.updateTask(
                         it.copy(
-                            status = TaskStatus.WAITING,
-                            currentStep = "تعذر تنفيذ الدورة المجدولة؛ سيعيد Todd المحاولة.",
+                            status = if (blockedForResearchMode) TaskStatus.BLOCKED else TaskStatus.WAITING,
+                            currentStep = if (blockedForResearchMode) {
+                                "توقفت المهمة المجدولة؛ البحث يحتاج وضعاً سحابياً ومصادر ويب. غيّر الوضع ثم أعد تفعيلها."
+                            } else {
+                                "تعذر تنفيذ الدورة المجدولة؛ سيعيد Todd المحاولة."
+                            },
                             failureCause = error.message,
                             updatedAt = now
                         )
                     )
                 }
-                Result.retry()
+                if (blockedForResearchMode) {
+                    notifyResult(
+                        title = task?.title ?: "Todd",
+                        body = error.message ?: "البحث يحتاج إلى وضع سحابي."
+                    )
+                    Result.success()
+                } else {
+                    Result.retry()
+                }
             }
         )
     }

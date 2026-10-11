@@ -16,6 +16,7 @@ import { AndroidCodebaseViewer } from './components/AndroidCodebaseViewer';
 import { RemoteCodingSimulator } from './components/RemoteCodingSimulator';
 import { RulesEngineViewer } from './components/RulesEngineViewer';
 import { GeminiLiveVoiceModal } from './components/GeminiLiveVoiceModal';
+import { WebResearchSimulator } from './components/WebResearchSimulator';
 import {
   Layers,
   Keyboard,
@@ -31,6 +32,7 @@ import {
   FileCode,
   Terminal,
   Radio,
+  Search,
 } from 'lucide-react';
 
 const aiRouter = new AIRouter();
@@ -44,8 +46,8 @@ export const App: React.FC = () => {
   const [aiMode, setAiMode] = useState<AIProviderMode>('AUTO');
   const [isLiveVoiceOpen, setIsLiveVoiceOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<
-    'overview' | 'overlay' | 'keyboard' | 'voice' | 'tasks' | 'remote' | 'rules' | 'codebase'
-  >('overview');
+    'overview' | 'research' | 'overlay' | 'keyboard' | 'voice' | 'tasks' | 'remote' | 'rules' | 'codebase'
+  >('research');
 
   // 2. Persistent Projects
   const [projects, setProjects] = useState<Project[]>([
@@ -334,6 +336,7 @@ export const App: React.FC = () => {
         <div className="flex items-center gap-2 border-b border-slate-800 pb-2 overflow-x-auto scrollbar-none">
           {[
             { id: 'overview', label: 'الرئيسية والمشاريع', icon: FolderGit2 },
+            { id: 'research', label: 'وكيل الإنترنت والبحث (Research Agent)', icon: Search },
             { id: 'overlay', label: 'الزر العائم (Overlay)', icon: Layers },
             { id: 'keyboard', label: 'لوحة المفاتيح (IME)', icon: Keyboard },
             { id: 'voice', label: 'التفاعل الصوتي (Voice)', icon: Mic },
@@ -412,6 +415,10 @@ export const App: React.FC = () => {
               onCompleteTask={handleCompleteTask}
             />
           </div>
+        )}
+
+        {activeTab === 'research' && (
+          <WebResearchSimulator />
         )}
 
         {activeTab === 'overlay' && (

@@ -2,12 +2,23 @@ package com.todd.core.ai
 
 import android.util.Base64
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+
+/** The ordinary chat endpoint never receives the online search tool. */
+internal fun googleSearchToolsForRequest(request: AIRequest): JSONArray? =
+    if (request.webResearch) JSONArray().put(
+        JSONObject().put("google_search", JSONObject())
+    ) else null
+
+/** One bounded retry for transient server outages; never retry exhausted quotas or bad keys. */
+internal fun shouldRetryGenerateRequest(code: Int, attempt: Int): Boolean =
+    attempt == 0 && code in setOf(500, 502, 503, 504)
 
 internal fun thinkingLevelForGeminiModel(modelName: String): String =
     when {
@@ -54,6 +65,7 @@ class DirectGeminiAIProvider(
                 request.projectContext?.let { appendLine("Project Context: $it") }
                 request.screenContext?.let { appendLine("Screen Context: $it") }
                 request.selectedText?.let { appendLine("Selected Text: $it") }
+                if (request.webResearch) appendLine(WebResearchPolicy.instructions())
                 appendLine("User: ${request.prompt}")
             }
 
@@ -110,48 +122,59 @@ class DirectGeminiAIProvider(
                             )
                     )
 
+                googleSearchToolsForRequest(request)?.let { tools ->
+                    body.put("tools", tools)
+                }
+
+                // The selected model is kept unchanged. A single bounded retry
+                // handles temporary 5xx outages without exhausting daily quotas.
                 val endpoint =
                     "https://generativelanguage.googleapis.com/v1beta/models/" +
                         modelName + ":generateContent"
-                val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    connectTimeout = 20_000
-                    readTimeout = 90_000
-                    doOutput = true
-                    setRequestProperty("Content-Type", "application/json; charset=utf-8")
-                    setRequestProperty("x-goog-api-key", apiKey)
-                    setRequestProperty("User-Agent", "Todd-Android")
-                }
-
-                try {
-                    connection.outputStream.bufferedWriter(Charsets.UTF_8).use {
-                        it.write(body.toString())
+                var responseText = ""
+                for (attempt in 0..1) {
+                    val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
+                        requestMethod = "POST"
+                        connectTimeout = 20_000
+                        readTimeout = 90_000
+                        doOutput = true
+                        setRequestProperty("Content-Type", "application/json; charset=utf-8")
+                        setRequestProperty("x-goog-api-key", apiKey)
+                        setRequestProperty("User-Agent", "Todd-Android")
                     }
-                    requestObserver?.invoke(modelName)
+                    val statusCode: Int
+                    try {
+                        connection.outputStream.bufferedWriter(Charsets.UTF_8).use {
+                            it.write(body.toString())
+                        }
+                        requestObserver?.invoke(modelName)
+                        statusCode = connection.responseCode
+                        responseText = (if (statusCode in 200..299) {
+                            connection.inputStream
+                        } else {
+                            connection.errorStream
+                        })?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
+                    } finally {
+                        connection.disconnect()
+                    }
+                    if (statusCode in 200..299) break
 
-                    val code = connection.responseCode
-                    val responseText = (if (code in 200..299) {
-                        connection.inputStream
-                    } else {
-                        connection.errorStream
-                    })?.bufferedReader(Charsets.UTF_8)?.use { it.readText() }.orEmpty()
-
-                    if (code !in 200..299) {
-                        val message = runCatching {
-                            JSONObject(responseText)
-                                .optJSONObject("error")
-                                ?.optString("message")
-                        }.getOrNull().orEmpty()
-                        throw IllegalStateException(
-                            GeminiApiErrorMessages.describe(
-                                statusCode = code,
-                                apiMessage = message,
-                                modelName = modelName
-                            )
+                    val message = runCatching {
+                        JSONObject(responseText).optJSONObject("error")?.optString("message")
+                    }.getOrNull().orEmpty()
+                    if (shouldRetryGenerateRequest(statusCode, attempt)) {
+                        delay(1_000L)
+                        continue
+                    }
+                    throw IllegalStateException(
+                        GeminiApiErrorMessages.describe(
+                            statusCode = statusCode,
+                            apiMessage = message,
+                            modelName = modelName
                         )
-                    }
-
-                    val root = JSONObject(responseText)
+                    )
+                }
+                val root = JSONObject(responseText)
                     val candidates = root.optJSONArray("candidates")
                         ?: throw IllegalStateException("Gemini returned no candidates.")
                     if (candidates.length() == 0) {
@@ -213,9 +236,6 @@ class DirectGeminiAIProvider(
                         latencyMs = System.currentTimeMillis() - startedAt,
                         sources = sources.distinctBy { it.url }
                     )
-                } finally {
-                    connection.disconnect()
-                }
             }
         }
 }

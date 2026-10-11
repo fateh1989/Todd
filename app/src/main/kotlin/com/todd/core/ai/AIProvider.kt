@@ -24,6 +24,8 @@ data class AIRequest(
     val screenContext: String? = null,
     val screenImagePath: String? = null,
     val projectContext: String? = null,
+    /** True only when the user explicitly asks for current information from the web. */
+    val webResearch: Boolean = false,
     val temperature: Float = 0.7f,
     val maxTokens: Int = 1024
 )
@@ -31,7 +33,15 @@ data class AIRequest(
 data class AISource(
     val title: String? = null,
     val url: String,
-    val domain: String? = null
+    val domain: String? = null,
+    /** A short, best-effort page excerpt; its presence does not itself verify a claim. */
+    val excerpt: String? = null,
+    /** Stable 1-based position in the original search-citation list. */
+    val citationIndex: Int? = null,
+    /** Diagnostic fetch status: e.g. "200_OK", "403_FORBIDDEN", "TIMEOUT", "JS_CLIENT_RENDER_ONLY", "FAILED" */
+    val fetchStatus: String? = null,
+    /** Discovered outlinks on the page for deep multi-step exploration */
+    val outlinks: List<String> = emptyList()
 )
 
 data class AIResponse(

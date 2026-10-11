@@ -79,3 +79,14 @@ export interface FailureRecord {
   retryCondition: string;
   timestamp: number;
 }
+
+export interface AISource {
+  title?: string;
+  url: string;
+  domain?: string;
+  excerpt?: string;
+  citationIndex?: number;
+  fetchStatus?: string;
+  outlinks?: string[];
+}
+
