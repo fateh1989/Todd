@@ -68,7 +68,7 @@ class ToddTextAgent(
     private val directInteractionClient: DirectGeminiInteractionClient? = null,
     private val promptLibrary: ToddPromptLibrary? = null,
     private val modelName: String = "gemini-3.8-flash",
-    private val webSourceFetcher: WebSourceFetcher = WebSourceFetcher()
+    val webSourceFetcher: WebSourceFetcher = WebSourceFetcher()
 ) {
 
     suspend fun respond(

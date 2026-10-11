@@ -37,7 +37,9 @@ import com.todd.core.model.Project
 import com.todd.core.model.TaskStatus
 import com.todd.core.project.ActiveProjectStore
 import com.todd.service.recovery.AutonomousRecoveryScheduler
-import com.todd.core.scheduler.ToddTaskScheduler
+import com.todd.core.ai.AndroidChromiumPageRenderer
+import com.todd.core.ai.WebAgentLogStore
+import com.todd.core.ai.WebSourceFetcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -58,6 +60,15 @@ class ToddApplication : Application() {
         private set
 
     lateinit var textAgent: ToddTextAgent
+        private set
+
+    lateinit var chromiumPageRenderer: AndroidChromiumPageRenderer
+        private set
+
+    lateinit var webAgentLogStore: WebAgentLogStore
+        private set
+
+    lateinit var webSourceFetcher: WebSourceFetcher
         private set
 
     lateinit var diagnostics: ToddDiagnostics
@@ -286,6 +297,15 @@ class ToddApplication : Application() {
             localProvider = localProvider,
             cloudProvider = geminiProvider
         )
+
+        chromiumPageRenderer = AndroidChromiumPageRenderer(this)
+        webAgentLogStore = WebAgentLogStore()
+        webSourceFetcher = WebSourceFetcher(
+            browserRenderer = chromiumPageRenderer,
+            logListener = webAgentLogStore
+        )
+        webAgentLogStore.attachFetcher(webSourceFetcher)
+
         textAgent = ToddTextAgent(
             aiRouter = aiRouter,
             githubTool = githubTool,
@@ -296,7 +316,8 @@ class ToddApplication : Application() {
             stateMachine = stateMachine,
             rulesEngine = rulesEngine,
             directInteractionClient = directGeminiInteractionClient,
-            promptLibrary = ToddPromptLibrary(this)
+            promptLibrary = ToddPromptLibrary(this),
+            webSourceFetcher = webSourceFetcher
         )
         diagnostics = ToddDiagnostics(
             context = this,

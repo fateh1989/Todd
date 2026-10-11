@@ -54,11 +54,19 @@ data class WebAgentLogEvent(
     val tablesCount: Int = 0
 )
 
+data class ChromiumRenderResult(
+    val excerpt: String,
+    val title: String? = null,
+    val status: String = "200_OK_CHROMIUM",
+    val outlinks: List<String> = emptyList(),
+    val tables: List<String> = emptyList()
+)
+
 /**
  * Chromium WebView rendering contract for dynamic JavaScript/SPA pages.
  */
 interface ChromiumPageRenderer {
-    suspend fun renderAndExtract(url: String, timeoutMs: Long = 10_000L): Pair<String, String>?
+    suspend fun renderAndExtract(url: String, timeoutMs: Long = 12_000L): ChromiumRenderResult?
     fun destroy()
 }
 
@@ -132,6 +140,9 @@ class WebSourceFetcher(
 
             var finalExcerpt = excerpt
             var finalStatus = status
+            var finalTitle = title
+            var finalOutlinks = outlinks
+            var finalTables = tables
 
             // If page requires JavaScript execution, fallback to Chromium WebView safely
             if ((status == "JS_CLIENT_RENDER_ONLY" || status == "EMPTY_OR_MINIMAL_CONTENT") && browserRenderer != null) {
@@ -140,13 +151,22 @@ class WebSourceFetcher(
                         phase = "OPEN_PAGE",
                         url = source.url,
                         engine = "CHROMIUM_WEBVIEW",
-                        details = "الموقع يتطلب جافاسكريبت. جاري تشغيل Chromium WebView المعزول لقراءة DOM..."
+                        details = "الموقع يتطلب جافاسكريبت. جاري تشغيل Android WebView (Chromium) المعزول لقراءة DOM..."
                     )
                 )
                 val rendered = browserRenderer.renderAndExtract(source.url)
-                if (rendered != null) {
-                    finalExcerpt = rendered.first.take(MAX_EXCERPT_CHARS)
-                    finalStatus = rendered.second
+                if (rendered != null && rendered.excerpt.isNotBlank()) {
+                    finalExcerpt = rendered.excerpt.take(MAX_EXCERPT_CHARS)
+                    finalStatus = rendered.status
+                    if (!rendered.title.isNullOrBlank()) {
+                        finalTitle = rendered.title
+                    }
+                    if (rendered.outlinks.isNotEmpty()) {
+                        finalOutlinks = (finalOutlinks + rendered.outlinks).distinct().take(15)
+                    }
+                    if (rendered.tables.isNotEmpty()) {
+                        finalTables = (finalTables + rendered.tables).distinct()
+                    }
                 }
             }
 
@@ -155,10 +175,11 @@ class WebSourceFetcher(
                     WebAgentLogEvent(
                         phase = "READ_PAGE",
                         url = source.url,
-                        details = "تمت قراءة الصفحة واستخراج المحتوى (${finalExcerpt.length} حرف، العنوان: \"${title ?: ""}\")",
+                        engine = if (finalStatus.contains("CHROMIUM")) "CHROMIUM_WEBVIEW" else "LIGHTWEIGHT_HTTP",
+                        details = "تمت قراءة الصفحة واستخراج المحتوى (${finalExcerpt.length} حرف، العنوان: \"${finalTitle ?: ""}\")",
                         charsRead = finalExcerpt.length,
-                        outlinksCount = outlinks.size,
-                        tablesCount = tables.size
+                        outlinksCount = finalOutlinks.size,
+                        tablesCount = finalTables.size
                     )
                 )
             } else {
@@ -166,6 +187,7 @@ class WebSourceFetcher(
                     WebAgentLogEvent(
                         phase = "FAILURE",
                         url = source.url,
+                        engine = if (finalStatus.contains("CHROMIUM")) "CHROMIUM_WEBVIEW" else "LIGHTWEIGHT_HTTP",
                         details = "تعذر استخراج نص كافٍ من الصفحة ($finalStatus)",
                         failureReason = finalStatus
                     )
@@ -173,12 +195,12 @@ class WebSourceFetcher(
             }
 
             source.copy(
-                title = source.title ?: title,
+                title = source.title ?: finalTitle,
                 domain = source.domain ?: runCatching { URI(source.url).host }.getOrNull(),
                 excerpt = finalExcerpt,
                 citationIndex = citationIndex,
                 fetchStatus = finalStatus,
-                outlinks = outlinks
+                outlinks = finalOutlinks
             )
         } catch (cancelled: CancellationException) {
             logListener?.onLogEvent(
