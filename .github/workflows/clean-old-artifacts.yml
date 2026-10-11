@@ -1,0 +1,33 @@
+name: Clean old Actions artifacts
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/clean-old-artifacts.yml"
+  schedule:
+    - cron: "17 4 * * *"
+
+permissions:
+  actions: write
+
+jobs:
+  prune:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete artifacts older than seven days
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cutoff="$(date -u -d '7 days ago' +'%Y-%m-%dT%H:%M:%SZ')"
+          artifact_ids="$(gh api --paginate "/repos/${GITHUB_REPOSITORY}/actions/artifacts?per_page=100" --jq ".artifacts[] | select(.created_at < \"$cutoff\") | .id")"
+          if [[ -z "$artifact_ids" ]]; then
+            echo "No artifacts older than seven days."
+            exit 0
+          fi
+          while IFS= read -r artifact_id; do
+            [[ -z "$artifact_id" ]] && continue
+            gh api --method DELETE "/repos/${GITHUB_REPOSITORY}/actions/artifacts/$artifact_id" >/dev/null
+            echo "Deleted artifact $artifact_id"
+          done <<< "$artifact_ids"
