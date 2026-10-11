@@ -1,0 +1,16 @@
+{
+  "source": "https://raw.githubusercontent.com/f/prompts.chat/bd4ed9313fdb1204e8c256d709d13694f72581de/prompts.csv",
+  "upstream_csv_git_blob_sha1": "f869b9947ed309d180f737bbd724ff0496777f62",
+  "license_of_imported_prompts": "CC0",
+  "total_selected": 200,
+  "categories": {
+    "automation": 20,
+    "coding": 65,
+    "mobile": 25,
+    "planning": 25,
+    "research": 35,
+    "translation": 20,
+    "voice": 10
+  },
+  "purpose": "Locally bundled, advisory patterns only; no runtime calls or elevation of permissions"
+}
