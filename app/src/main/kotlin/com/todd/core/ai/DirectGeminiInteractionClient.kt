@@ -55,8 +55,8 @@ class DirectGeminiInteractionClient(
         draft: String,
         sources: List<AISource>
     ): String? = withContext(Dispatchers.IO) {
-        val evidence = sources.filter { !it.excerpt.isNullOrBlank() }.take(WebSourceFetcher.MAX_SOURCES)
-        if (evidence.isEmpty()) return@withContext null
+        val evidence = sources.take(WebSourceFetcher.MAX_SOURCES)
+        if (evidence.none { !it.excerpt.isNullOrBlank() }) return@withContext null
 
         val apiKey = apiKeyProvider()?.trim().orEmpty()
         if (apiKey.isBlank()) return@withContext null

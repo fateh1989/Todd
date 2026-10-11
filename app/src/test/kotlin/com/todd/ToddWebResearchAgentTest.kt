@@ -209,7 +209,7 @@ class ToddWebResearchAgentTest {
                     .protocol(Protocol.HTTP_1_1)
                     .code(200)
                     .message("OK")
-                    .body("<html><body><p>Fact about topic</p></body></html>".toResponseBody("text/html".toMediaTypeOrNull()))
+                    .body("<html><body><p>Fact about topic with enough detail to form a readable page excerpt.</p></body></html>".toResponseBody("text/html".toMediaTypeOrNull()))
                     .build()
             })
             .build()

@@ -41,7 +41,8 @@ object WebResearchPolicy {
         appendLine()
         appendLine("Question: $question")
         appendLine("Draft to review:\n$draft")
-        sources.filter { !it.excerpt.isNullOrBlank() }.take(WebSourceFetcher.MAX_SOURCES)
+        // Include blocked/unreadable citations as explicit failures, never as evidence.
+        sources.take(WebSourceFetcher.MAX_SOURCES)
             .forEachIndexed { index, source ->
                 val citationNumber = source.citationIndex ?: (index + 1)
                 appendLine()
@@ -50,7 +51,11 @@ object WebResearchPolicy {
                 if (!source.fetchStatus.isNullOrBlank()) {
                     appendLine("Fetch Status: ${source.fetchStatus}")
                 }
-                appendLine("Page excerpt (possibly incomplete):\n${source.excerpt}")
+                if (source.excerpt.isNullOrBlank()) {
+                    appendLine("Page excerpt: unavailable; do not cite this source as content evidence.")
+                } else {
+                    appendLine("Page excerpt (possibly incomplete):\n${source.excerpt}")
+                }
             }
     }
 
