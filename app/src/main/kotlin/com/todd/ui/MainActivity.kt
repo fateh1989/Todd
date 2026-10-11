@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 26396)
-Total output lines: 2283
-
 package com.todd.ui
 
 import android.Manifest
@@ -494,7 +491,1252 @@ fun ToddMainScreen(
                                 goal = goal,
                                 criteria = "GitHub Actions verification must complete with evidence"
                             )
-                           …14396 tokens truncated…asswordVisualTransformation(),
+                            app.repository.saveTask(task)
+                            app.repository.saveMemory(
+                                MemoryEntry(
+                                    id = "chat-todd-${System.nanoTime()}",
+                                    projectId = projectId,
+                                    layer = MemoryLayer.EPISODIC,
+                                    key = "chat:todd:${System.currentTimeMillis()}",
+                                    value = "بدأ التحقق البعيد. رقم المهمة: ${task.id}",
+                                    provenance = "SYSTEM",
+                                    isVerified = false
+                                )
+                            )
+
+                            if (!app.githubCredentialStore.hasToken()) {
+                                app.repository.updateTask(
+                                    task.copy(
+                                        status = TaskStatus.BLOCKED,
+                                        currentStep = "أضف تفويض GitHub من الإعدادات لتشغيل المهمة البعيدة.",
+                                        updatedAt = System.currentTimeMillis()
+                                    )
+                                )
+                                app.repository.saveMemory(
+                                    MemoryEntry(
+                                        id = "chat-todd-${System.nanoTime()}",
+                                        projectId = projectId,
+                                        layer = MemoryLayer.EPISODIC,
+                                        key = "chat:todd:${System.currentTimeMillis()}",
+                                        value = "تعذر بدء التحقق البعيد: تفويض GitHub غير مضاف بعد.",
+                                        provenance = "SYSTEM",
+                                        isVerified = true
+                                    )
+                                )
+                            } else {
+                                val project = app.repository.getProjectById(projectId)
+                                val repoName = project?.repository
+                                    ?: if (projectId == "todd-main") "fateh1989/Todd" else null
+                                val branch = project?.branch?.ifBlank { "main" } ?: "main"
+
+                                if (repoName == null) {
+                                    app.repository.updateTask(
+                                        task.copy(
+                                            status = TaskStatus.BLOCKED,
+                                            currentStep = "لا يوجد مستودع مرتبط بهذا المشروع.",
+                                            updatedAt = System.currentTimeMillis()
+                                        )
+                                    )
+                                } else {
+                                    val info = app.githubTool.getRepositoryInfo(repoName, branch).getOrNull()
+                                    if (info == null) {
+                                        app.repository.updateTask(
+                                            task.copy(
+                                                status = TaskStatus.FAILED,
+                                                currentStep = "تعذر قراءة حالة المستودع.",
+                                                updatedAt = System.currentTimeMillis()
+                                            )
+                                        )
+                                    } else {
+                                        val started = app.remoteExecutor.startJob(
+                                            RemoteJobRequest(
+                                                jobId = task.id,
+                                                projectId = projectId,
+                                                repository = repoName,
+                                                branch = branch,
+                                                startCommit = info.latestCommitSha,
+                                                objective = goal,
+                                                completionCriteria = task.completionCriteria,
+                                                mode = RemoteExecutionMode.VERIFY_ANDROID
+                                            )
+                                        )
+                                        started.exceptionOrNull()?.let { error ->
+                                            app.repository.updateTask(
+                                                task.copy(
+                                                    status = TaskStatus.FAILED,
+                                                    currentStep = error.message ?: "تعذر بدء المهمة البعيدة.",
+                                                    failureCause = error.message,
+                                                    updatedAt = System.currentTimeMillis()
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    onAutonomousCodingTask = { title, goal ->
+                        val taskId = app.autonomousTaskCoordinator.start(
+                            projectId = projectId,
+                            title = title,
+                            goal = goal,
+                            maxIterations = 4
+                        )
+                        scope.launch {
+                            val now = System.currentTimeMillis()
+                            app.repository.saveMemory(
+                                MemoryEntry(
+                                    id = "chat-user-${System.nanoTime()}",
+                                    projectId = projectId,
+                                    layer = MemoryLayer.EPISODIC,
+                                    key = "chat:user:$now",
+                                    value = goal,
+                                    provenance = "USER",
+                                    isVerified = true
+                                )
+                            )
+                            app.repository.saveMemory(
+                                MemoryEntry(
+                                    id = "chat-todd-${System.nanoTime()}",
+                                    projectId = projectId,
+                                    layer = MemoryLayer.EPISODIC,
+                                    key = "chat:todd:${System.currentTimeMillis()}",
+                                    value = "بدأت مهمة البرمجة. رقم المهمة: $taskId",
+                                    provenance = "SYSTEM",
+                                    isVerified = false
+                                )
+                            )
+                        }
+                    }
+                )
+                1 -> ProjectsView(
+                    projects = projects,
+                    activeProjectId = state.activeProjectId ?: "todd-main",
+                    onSelectProject = { project ->
+                        stateMachine.setActiveProject(project.id)
+                        app.activeProjectStore.set(project.id)
+                    },
+                    onCreateProject = { name, repositoryName, branch ->
+                        scope.launch {
+                            val project = Project(
+                                id = "project-${System.currentTimeMillis()}",
+                                name = name.trim(),
+                                description = "",
+                                repository = repositoryName.trim().ifBlank { null },
+                                branch = branch.trim().ifBlank { "main" },
+                                currentGoal = ""
+                            )
+                            app.repository.saveProject(project)
+                            stateMachine.setActiveProject(project.id)
+                            app.activeProjectStore.set(project.id)
+                        }
+                    }
+                )
+                2 -> ActivityView(
+                    tasks = tasks,
+                    schedules = schedules,
+                    codingLogs = codingLogs,
+                    onScheduleTask = { task, delayMinutes, repeatMinutes ->
+                        scope.launch {
+                            val now = System.currentTimeMillis()
+                            val firstRun = now + java.util.concurrent.TimeUnit.MINUTES.toMillis(delayMinutes)
+                            val schedule = ScheduledTask(
+                                id = "schedule-${System.nanoTime()}",
+                                taskId = task.id,
+                                projectId = task.projectId,
+                                prompt = task.goal.ifBlank { task.title },
+                                firstRunAt = firstRun,
+                                intervalMinutes = repeatMinutes,
+                                nextRunAt = firstRun
+                            )
+                            app.taskScheduler.schedule(schedule)
+                            app.repository.updateTask(
+                                task.copy(
+                                    status = TaskStatus.WAITING,
+                                    isRecurring = repeatMinutes != null,
+                                    scheduledTime = firstRun,
+                                    currentStep = if (repeatMinutes == null) {
+                                        "مجدولة للتنفيذ لاحقاً."
+                                    } else {
+                                        "مجدولة للتكرار كل $repeatMinutes دقيقة."
+                                    },
+                                    updatedAt = now
+                                )
+                            )
+                        }
+                    },
+                    onPauseSchedule = { schedule ->
+                        scope.launch { app.taskScheduler.pause(schedule.id) }
+                    },
+                    onResumeSchedule = { schedule ->
+                        scope.launch { app.taskScheduler.resume(schedule.id) }
+                    },
+                    onCancelSchedule = { schedule ->
+                        scope.launch { app.taskScheduler.cancel(schedule.id) }
+                    },
+                    onRefreshRemote = { task ->
+                        scope.launch {
+                            val result = app.remoteExecutor.reconnect(task.id)
+                            result.exceptionOrNull()?.let { error ->
+                                app.repository.updateTask(
+                                    task.copy(
+                                        currentStep = "تعذر تحديث المهمة البعيدة: ${error.message ?: "خطأ غير معروف"}",
+                                        failureCause = error.message,
+                                        updatedAt = System.currentTimeMillis()
+                                    )
+                                )
+                            }
+                        }
+                    },
+                    onCancelRemote = { task ->
+                        scope.launch {
+                            val result = app.remoteExecutor.requestCancel(task.id)
+                            result.exceptionOrNull()?.let { error ->
+                                app.repository.updateTask(
+                                    task.copy(
+                                        currentStep = "تعذر إلغاء المهمة البعيدة: ${error.message ?: "خطأ غير معروف"}",
+                                        failureCause = error.message,
+                                        updatedAt = System.currentTimeMillis()
+                                    )
+                                )
+                            }
+                        }
+                    }
+                )
+                3 -> SettingsView(
+                    state = state,
+                    visualScreenRunning = visualScreen.isRunning,
+                    lastVisualCaptureAt = visualScreen.capturedAt,
+                    accessibilityEnabled = accessibilityEnabled,
+                    notificationAccessEnabled = notificationAccessEnabled,
+                    githubTokenConfigured = app.githubCredentialStore.hasToken(),
+                    learnedMemories = learnedMemories,
+                    activeRules = activeRules,
+                    geminiApiKeyConfigured = geminiApiKeyConfigured,
+                    selectedGeminiModel = selectedGeminiModel,
+                    firebaseConfigured = firebaseRuntimeStatus.configured,
+                    firebaseProjectId = firebaseRuntimeStatus.projectId,
+                    firebaseReason = firebaseRuntimeStatus.reason,
+                    localAIStatus = localAIStatus,
+                    localAIBusy = localAIBusy,
+                    cloudAIStatus = cloudAIStatus,
+                    cloudAIBusy = cloudAIBusy,
+                    onSaveGeminiApiKey = { key ->
+                        runCatching { app.geminiApiKeyStore.saveKey(key) }
+                            .onSuccess {
+                                geminiApiKeyConfigured = true
+                                cloudAIStatus = "تم حفظ مفتاح Gemini؛ اختبر الاتصال الآن"
+                                app.autonomousTaskCoordinator.resumePending()
+                            }
+                            .onFailure { error ->
+                                cloudAIStatus = "تعذر حفظ مفتاح Gemini: ${error.message ?: "خطأ غير معروف"}"
+                            }
+                    },
+                    onClearGeminiApiKey = {
+                        app.geminiApiKeyStore.clear()
+                        geminiApiKeyConfigured = false
+                        cloudAIStatus = "تم مسح مفتاح Gemini"
+                    },
+                    onGeminiModelChange = { model ->
+                        app.geminiModelPreferenceStore.set(model)
+                        selectedGeminiModel = model
+                        stateMachine.setAIMode(AIProviderMode.CLOUD_PREFERRED)
+                        cloudAIStatus = "تم اختيار ${model.displayName} للتشغيل السحابي"
+                    },
+                    onCheckCloudAI = {
+                        scope.launch {
+                            cloudAIBusy = true
+                            cloudAIStatus = if (!geminiApiKeyConfigured) {
+                                "أضف مفتاح Gemini API أولاً"
+                            } else {
+                                app.aiRouter.cloudProvider.generateText(
+                                    com.todd.core.ai.AIRequest(
+                                        prompt = "Reply with exactly: TODD_CLOUD_OK",
+                                        systemPrompt = "This is a Todd connectivity self-test. Do not add anything else.",
+                                        temperature = 0.0f,
+                                        maxTokens = 512
+                                    )
+                                ).fold(
+                                    onSuccess = { response ->
+                                        if (response.text.contains("TODD_CLOUD_OK")) {
+                                            "الاتصال السحابي الحقيقي يعمل"
+                                        } else {
+                                            "وصل Todd إلى النموذج السحابي واستلم رداً فعلياً"
+                                        }
+                                    },
+                                    onFailure = { error ->
+                                        "فشل الاتصال السحابي: ${error.message ?: "خطأ غير معروف"}"
+                                    }
+                                )
+                            }
+                            cloudAIBusy = false
+                        }
+                    },
+                    onCheckLocalAI = {
+                        scope.launch {
+                            localAIBusy = true
+                            val available = app.aiRouter.localProvider.isAvailable()
+                            localAIStatus = if (available) {
+                                "النموذج المحلي متاح الآن على هذا الجهاز"
+                            } else {
+                                "النموذج المحلي غير جاهز بعد أو غير مدعوم على هذا الجهاز"
+                            }
+                            localAIBusy = false
+                        }
+                    },
+                    onPrepareLocalAI = {
+                        scope.launch {
+                            localAIBusy = true
+                            val provider = app.aiRouter.localProvider as? LocalOnDeviceAIProvider
+                            localAIStatus = if (provider == null) {
+                                "مزود الذكاء المحلي الحالي لا يدعم التهيئة"
+                            } else {
+                                provider.prepareModel().fold(
+                                    onSuccess = { "تم تجهيز النموذج المحلي وأصبح متاحاً" },
+                                    onFailure = { "تعذر تجهيز النموذج المحلي: ${it.message ?: "خطأ غير معروف"}" }
+                                )
+                            }
+                            localAIBusy = false
+                        }
+                    },
+                    onSaveFirebaseConfig = { rawJson ->
+                        val result = runCatching {
+                            val credentials =
+                                app.firebaseRuntimeCredentialStore.saveGoogleServicesJson(rawJson)
+                            FirebaseRuntimeConfig.configure(app, credentials)
+                        }
+                        firebaseRuntimeStatus = result.getOrElse { error ->
+                            FirebaseRuntimeConfig.current().copy(
+                                configured = false,
+                                reason = error.message ?: "تعذر حفظ إعداد Firebase."
+                            )
+                        }
+                        if (result.isSuccess) {
+                            cloudAIStatus = "تم حفظ إعداد Firebase؛ اختبر الاتصال السحابي الآن"
+                            app.autonomousTaskCoordinator.resumePending()
+                        }
+                    },
+                    onClearFirebaseConfig = {
+                        app.firebaseRuntimeCredentialStore.clear()
+                        FirebaseRuntimeConfig.clearRuntimeApp()
+                        firebaseRuntimeStatus = FirebaseRuntimeConfig.current()
+                        cloudAIStatus = "تم مسح إعداد Firebase المحلي"
+                    },
+                    onSaveGitHubToken = { token ->
+                        app.githubCredentialStore.saveToken(token)
+                        app.autonomousTaskCoordinator.resumePending()
+                    },
+                    onClearGitHubToken = { app.githubCredentialStore.clearToken() },
+                    onDeleteLearnedMemory = { memory ->
+                        scope.launch { app.repository.deleteMemory(memory) }
+                    },
+                    onSaveRule = { rule ->
+                        scope.launch { app.repository.saveRule(rule) }
+                    },
+                    diagnosticsReport = diagnosticsReport,
+                    diagnosticsBusy = diagnosticsBusy,
+                    onRunDiagnostics = {
+                        scope.launch {
+                            diagnosticsBusy = true
+                            diagnosticsReport = runCatching { app.diagnostics.run() }.getOrNull()
+                            diagnosticsBusy = false
+                        }
+                    },
+                    onAIModeChange = { mode -> stateMachine.setAIMode(mode) },
+                    onOpenAccessibility = onOpenAccessibility,
+                    onOpenNotificationAccess = onOpenNotificationAccess,
+                    overlayEnabled = overlayEnabled,
+                    onStartOverlay = onStartOverlay,
+                    onStartVisualScreen = onStartVisualScreen,
+                    onStopVisualScreen = onStopVisualScreen
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun StatusCard(state: ToddState, onStartOverlay: () -> Unit) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+        shape = RoundedCornerShape(16.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    val statusColor = when {
+                        state.isPowerOff -> Color(0xFFEF4444)
+                        state.isPaused -> Color(0xFFF59E0B)
+                        state.globalStatus == ToddGlobalStatus.WORKING -> Color(0xFF6366F1)
+                        else -> Color(0xFF10B981)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(10.dp)
+                            .background(statusColor, RoundedCornerShape(5.dp))
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = if (state.isPowerOff) "Todd متوقف (Power OFF)"
+                               else if (state.isPaused) "Todd في وضع الإيقاف المؤقت (PAUSED)"
+                               else "Todd نشط وجاهز (${state.globalStatus})",
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+
+                AssistChip(
+                    onClick = onStartOverlay,
+                    label = { Text("الزر العائم", fontSize = 11.sp) },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.Layers,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+            Text(
+                "آخر تحقق: ${state.lastVerifiedAction}",
+                fontSize = 12.sp,
+                color = Color(0xFF94A3B8)
+            )
+            Text(
+                "التالي: ${state.nextPlannedAction}",
+                fontSize = 12.sp,
+                color = Color(0xFFCBD5E1)
+            )
+        }
+    }
+}
+
+@Composable
+private fun MessageTextWithLinks(text: String) {
+    val uriHandler = LocalUriHandler.current
+    val linkedText = remember(text) {
+        buildAnnotatedString {
+            var cursor = 0
+            URL_PATTERN.findAll(text).forEach { match ->
+                append(text.substring(cursor, match.range.first))
+                val url = match.value.trimEnd('.', ',', ';', ')', ']', '}', '،', '؛')
+                if (url.isBlank()) {
+                    append(match.value)
+                } else {
+                    pushStringAnnotation(tag = "URL", annotation = url)
+                    withStyle(
+                        SpanStyle(
+                            color = Color(0xFF93C5FD),
+                            textDecoration = TextDecoration.Underline
+                        )
+                    ) { append(url) }
+                    pop()
+                    append(match.value.removePrefix(url))
+                }
+                cursor = match.range.last + 1
+            }
+            append(text.substring(cursor))
+        }
+    }
+
+    ClickableText(
+        text = linkedText,
+        modifier = Modifier.padding(12.dp),
+        style = TextStyle(color = Color.White),
+        onClick = { offset ->
+            linkedText.getStringAnnotations("URL", offset, offset)
+                .firstOrNull()
+                ?.let { annotation -> runCatching { uriHandler.openUri(annotation.item) } }
+        }
+    )
+}
+
+private val URL_PATTERN = Regex("https?://[^\\s<>\\\"']+")
+
+@Composable
+fun HomeDashboard(
+    state: ToddState,
+    messages: List<MemoryEntry>,
+    isBusy: Boolean,
+    voiceState: GeminiLiveState,
+    voiceTranscripts: List<LiveTranscriptItem>,
+    voiceMuted: Boolean,
+    selectedGeminiModel: GeminiCloudModel,
+    geminiUsage: GeminiUsageSnapshot,
+    onGeminiModelChange: (GeminiCloudModel) -> Unit,
+    onToggleVoice: () -> Unit,
+    onToggleVoiceMute: () -> Unit,
+    onSendMessage: (String, Boolean, Boolean) -> Unit,
+    onTaskAction: (String, String) -> Unit,
+    onAutonomousCodingTask: (String, String) -> Unit
+) {
+    var quickInput by remember { mutableStateOf("") }
+    var actionMode by remember { mutableStateOf("CHAT") }
+    var composerFocused by remember { mutableStateOf(false) }
+    val chatListState = rememberLazyListState()
+    val density = LocalDensity.current
+    val imeVisible = WindowInsets.ime.getBottom(density) > 0
+
+    fun submitCurrentInput() {
+        val text = quickInput.trim()
+        if (text.isBlank() || isBusy) return
+
+        when (actionMode) {
+            "REMOTE" -> onTaskAction(text, text)
+            "CODING" -> onAutonomousCodingTask(text, text)
+            else -> onSendMessage(
+                text,
+                actionMode == "TRANSLATION",
+                actionMode == "RESEARCH"
+            )
+        }
+        quickInput = ""
+    }
+
+    // Entering the chat, receiving a new message, or starting a reply should show
+    // the newest part of the conversation instead of returning to the first message.
+    LaunchedEffect(messages.size, isBusy, composerFocused, imeVisible) {
+        val targetIndex = when {
+            isBusy -> messages.size
+            messages.isNotEmpty() -> messages.lastIndex
+            else -> -1
+        }
+        if (targetIndex >= 0) {
+            chatListState.scrollToItem(targetIndex)
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            // Activity uses adjustNothing; Compose applies the IME height exactly once.
+            .imePadding()
+    ) {
+        VoiceConversationCard(
+            state = voiceState,
+            transcripts = voiceTranscripts,
+            muted = voiceMuted,
+            onToggle = onToggleVoice,
+            onToggleMute = onToggleVoiceMute
+        )
+
+        Spacer(modifier = Modifier.height(3.dp))
+        Text("محادثة Todd", fontWeight = FontWeight.Bold, color = Color.White, fontSize = 13.sp)
+        Spacer(modifier = Modifier.height(2.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_5,
+                onClick = { onGeminiModelChange(GeminiCloudModel.FLASH_LITE_3_5) },
+                label = { Text("3.5 خفيف") }
+            )
+            FilterChip(
+                selected = selectedGeminiModel == GeminiCloudModel.FLASH_3_8,
+                onClick = { onGeminiModelChange(GeminiCloudModel.FLASH_3_8) },
+                label = { Text("3.8 قوي") }
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+
+        LazyColumn(
+            state = chatListState,
+            modifier = Modifier
+                .weight(1f)
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            items(messages, key = { it.id }) { message ->
+                val isUser = message.key.startsWith("chat:user:")
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
+                ) {
+                    Surface(
+                        color = if (isUser) Color(0xFF4338CA) else Color(0xFF1E293B),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(0.98f)
+                    ) {
+                        MessageTextWithLinks(message.value)
+                    }
+                }
+            }
+            if (isBusy) {
+                item {
+                    Text("Todd يعمل...", color = Color(0xFF94A3B8), fontSize = 12.sp)
+                }
+            }
+        }
+
+        Column(
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                TextButton(
+                    onClick = {
+                        actionMode = if (actionMode == "TRANSLATION") "CHAT" else "TRANSLATION"
+                    },
+                    enabled = !isBusy,
+                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
+                ) {
+                    Text(
+                        if (actionMode == "TRANSLATION") "محادثة الترجمة ✓" else "محادثة الترجمة",
+                        fontSize = 10.sp
+                    )
+                }
+                TextButton(
+                    onClick = {
+                        actionMode = if (actionMode == "REMOTE") "CHAT" else "REMOTE"
+                    },
+                    enabled = !isBusy,
+                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
+                ) {
+                    Text(
+                        if (actionMode == "REMOTE") "تحقق بعيد ✓" else "تحقق بعيد",
+                        fontSize = 10.sp
+                    )
+                }
+                TextButton(
+                    onClick = {
+                        actionMode = if (actionMode == "CODING") "CHAT" else "CODING"
+                    },
+                    enabled = !isBusy,
+                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
+                ) {
+                    Text(
+                        if (actionMode == "CODING") "برمجة ✓" else "برمجة",
+                        fontSize = 10.sp
+                    )
+                }
+                TextButton(
+                    onClick = {
+                        actionMode = if (actionMode == "RESEARCH") "CHAT" else "RESEARCH"
+                    },
+                    enabled = !isBusy,
+                    contentPadding = PaddingValues(horizontal = 5.dp, vertical = 0.dp)
+                ) {
+                    Text(
+                        if (actionMode == "RESEARCH") "بحث موثق ✓" else "بحث موثق",
+                        fontSize = 10.sp
+                    )
+                }
+            }
+
+            OutlinedTextField(
+                value = quickInput,
+                onValueChange = { quickInput = it },
+                placeholder = {
+                    Text(
+                        when (actionMode) {
+                            "TRANSLATION" -> "اكتب النص للترجمة..."
+                            "REMOTE" -> "اكتب ما تريد التحقق منه..."
+                            "CODING" -> "اكتب مهمة البرمجة..."
+                            "RESEARCH" -> "اكتب سؤال البحث والمكان أو الفترة المطلوبة..."
+                            else -> "اكتب لتود..."
+                        }
+                    )
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .onFocusChanged { composerFocused = it.isFocused },
+                maxLines = 4,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(
+                    onSend = { submitCurrentInput() }
+                ),
+                trailingIcon = {
+                    IconButton(
+                        onClick = { submitCurrentInput() },
+                        enabled = quickInput.isNotBlank() && !isBusy
+                    ) {
+                        Icon(
+                            Icons.Default.Send,
+                            contentDescription = "إرسال",
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                },
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = Color(0xFF6366F1),
+                    unfocusedBorderColor = Color(0xFF334155),
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White
+                )
+            )
+        }
+    }
+}
+
+@Composable
+fun VoiceConversationCard(
+    state: GeminiLiveState,
+    transcripts: List<LiveTranscriptItem>,
+    muted: Boolean,
+    onToggle: () -> Unit,
+    onToggleMute: () -> Unit
+) {
+    val active = state != GeminiLiveState.DISCONNECTED && state != GeminiLiveState.ERROR
+    val stateLabel = when (state) {
+        GeminiLiveState.DISCONNECTED -> "غير متصل"
+        GeminiLiveState.CONNECTING -> "جارِ الاتصال"
+        GeminiLiveState.LISTENING -> "يستمع"
+        GeminiLiveState.THINKING -> "يفكر"
+        GeminiLiveState.SPEAKING -> "يتحدث"
+        GeminiLiveState.RECONNECTING -> "يعيد الاتصال"
+        GeminiLiveState.ERROR -> "خطأ في الاتصال"
+    }
+
+    Card(
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+        shape = RoundedCornerShape(10.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                "الصوت: $stateLabel",
+                color = Color(0xFFCBD5E1),
+                fontSize = 11.sp,
+                maxLines = 1
+            )
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (active) {
+                    IconButton(
+                        onClick = onToggleMute,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            if (muted) Icons.Default.MicOff else Icons.Default.Mic,
+                            contentDescription = "Mute",
+                            tint = if (muted) Color(0xFFF59E0B) else Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+                TextButton(
+                    onClick = onToggle,
+                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp)
+                ) {
+                    Icon(
+                        if (active) Icons.Default.Stop else Icons.Default.Mic,
+                        contentDescription = null,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(if (active) "إيقاف" else "تحدث", fontSize = 11.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun ProjectsView(
+    projects: List<Project>,
+    activeProjectId: String,
+    onSelectProject: (Project) -> Unit,
+    onCreateProject: (String, String, String) -> Unit
+) {
+    var showCreate by remember { mutableStateOf(false) }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text("المشاريع", color = Color.White, fontWeight = FontWeight.Bold)
+            Button(onClick = { showCreate = true }) {
+                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(5.dp))
+                Text("مشروع جديد")
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        LazyColumn(
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxSize()
+        ) {
+        items(projects) { project ->
+            val active = project.id == activeProjectId
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = if (active) Color(0xFF312E81) else Color(0xFF1E293B)
+                ),
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { onSelectProject(project) }
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(project.name, fontWeight = FontWeight.Bold, color = Color.White)
+                        if (active) {
+                            Badge(containerColor = Color(0xFF10B981)) {
+                                Text("نشط", fontSize = 10.sp)
+                            }
+                        }
+                    }
+                    Text(
+                        "المستودع: ${project.repository ?: "محلي"}",
+                        fontSize = 12.sp,
+                        color = Color(0xFF94A3B8)
+                    )
+                    Text(
+                        "الفرع: ${project.branch}",
+                        fontSize = 12.sp,
+                        color = Color(0xFF94A3B8)
+                    )
+                    Text(
+                        "آخر التزام موثق: ${project.lastVerifiedCommit ?: "لا يوجد بعد"}",
+                        fontSize = 11.sp,
+                        color = Color(0xFF818CF8)
+                    )
+                }
+            }
+        }
+    }
+
+    }
+
+    if (showCreate) {
+        var projectName by remember { mutableStateOf("") }
+        var repositoryName by remember { mutableStateOf("") }
+        var branchName by remember { mutableStateOf("main") }
+
+        AlertDialog(
+            onDismissRequest = { showCreate = false },
+            title = { Text("إنشاء مشروع Todd") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = projectName,
+                        onValueChange = { projectName = it },
+                        label = { Text("اسم المشروع") },
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = repositoryName,
+                        onValueChange = { repositoryName = it },
+                        label = { Text("GitHub owner/repo — اختياري") },
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = branchName,
+                        onValueChange = { branchName = it },
+                        label = { Text("الفرع") },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onCreateProject(projectName, repositoryName, branchName)
+                        showCreate = false
+                    },
+                    enabled = projectName.isNotBlank()
+                ) {
+                    Text("إنشاء")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { showCreate = false }) {
+                    Text("إلغاء")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun ActivityView(
+    tasks: List<Task>,
+    schedules: List<ScheduledTask>,
+    codingLogs: List<MemoryEntry>,
+    onScheduleTask: (Task, Long, Long?) -> Unit,
+    onPauseSchedule: (ScheduledTask) -> Unit,
+    onResumeSchedule: (ScheduledTask) -> Unit,
+    onCancelSchedule: (ScheduledTask) -> Unit,
+    onRefreshRemote: (Task) -> Unit,
+    onCancelRemote: (Task) -> Unit
+) {
+    var schedulingTask by remember { mutableStateOf<Task?>(null) }
+
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(tasks) { task ->
+            val remoteActive = task.status in setOf(
+                TaskStatus.PLANNED,
+                TaskStatus.IN_PROGRESS,
+                TaskStatus.WAITING,
+                TaskStatus.EXECUTED,
+                TaskStatus.VERIFYING,
+                TaskStatus.BLOCKED,
+                TaskStatus.PAUSED
+            )
+            val taskSchedules = schedules.filter { it.taskId == task.id }
+            val taskLog = codingLogs
+                .filter { it.key.startsWith("coding-log:${task.id}:") }
+                .takeLast(20)
+
+            Card(
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text(task.title, fontWeight = FontWeight.SemiBold, color = Color.White)
+                        Badge(
+                            containerColor = when (task.status) {
+                                TaskStatus.COMPLETED, TaskStatus.VERIFIED -> Color(0xFF10B981)
+                                TaskStatus.FAILED, TaskStatus.CANCELLED -> Color(0xFFEF4444)
+                                TaskStatus.IN_PROGRESS,
+                                TaskStatus.WAITING,
+                                TaskStatus.VERIFYING -> Color(0xFFF59E0B)
+                                TaskStatus.BLOCKED, TaskStatus.PAUSED -> Color(0xFF8B5CF6)
+                                else -> Color(0xFF64748B)
+                            }
+                        ) {
+                            Text(task.status.name, fontSize = 10.sp)
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        "الخطوة: ${task.currentStep}",
+                        fontSize = 12.sp,
+                        color = Color(0xFF94A3B8)
+                    )
+
+                    task.lastEvidence?.let {
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text("الدليل: $it", fontSize = 11.sp, color = Color(0xFF10B981))
+                    }
+
+                    task.failureCause?.let {
+                        Spacer(modifier = Modifier.height(3.dp))
+                        Text("الخطأ: $it", fontSize = 11.sp, color = Color(0xFFFCA5A5))
+                    }
+
+                    if (taskLog.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Surface(
+                            color = Color(0xFF020617),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(10.dp),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Text(
+                                    "سجل التنفيذ المباشر",
+                                    color = Color(0xFF22C55E),
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace
+                                )
+                                taskLog.forEach { entry ->
+                                    val time = java.text.SimpleDateFormat(
+                                        "HH:mm:ss",
+                                        java.util.Locale.getDefault()
+                                    ).format(java.util.Date(entry.timestamp))
+                                    Text(
+                                        text = "[$time] > ${entry.value}",
+                                        color = Color(0xFFD1FAE5),
+                                        fontSize = 10.sp,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    taskSchedules.forEach { schedule ->
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Surface(
+                            color = Color(0xFF0F172A),
+                            shape = RoundedCornerShape(10.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                val next = schedule.nextRunAt?.let {
+                                    java.text.DateFormat.getDateTimeInstance(
+                                        java.text.DateFormat.SHORT,
+                                        java.text.DateFormat.SHORT
+                                    ).format(java.util.Date(it))
+                                } ?: "لا يوجد موعد تالٍ"
+
+                                Text(
+                                    if (schedule.intervalMinutes == null) {
+                                        "موعد واحد • $next"
+                                    } else {
+                                        "متكرر كل ${schedule.intervalMinutes} دقيقة • $next"
+                                    },
+                                    color = if (schedule.enabled) Color(0xFF93C5FD) else Color(0xFF94A3B8),
+                                    fontSize = 11.sp
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    if (schedule.enabled) {
+                                        TextButton(onClick = { onPauseSchedule(schedule) }) {
+                                            Text("إيقاف مؤقت")
+                                        }
+                                    } else {
+                                        TextButton(onClick = { onResumeSchedule(schedule) }) {
+                                            Text("استئناف")
+                                        }
+                                    }
+                                    TextButton(onClick = { onCancelSchedule(schedule) }) {
+                                        Text("إلغاء الجدولة")
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(onClick = { schedulingTask = task }) {
+                            Icon(
+                                Icons.Default.Schedule,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(5.dp))
+                            Text("جدولة")
+                        }
+
+                        if (remoteActive) {
+                            OutlinedButton(onClick = { onRefreshRemote(task) }) {
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(5.dp))
+                                Text("تحديث")
+                            }
+
+                            if (task.status != TaskStatus.BLOCKED && task.status != TaskStatus.PAUSED) {
+                                OutlinedButton(onClick = { onCancelRemote(task) }) {
+                                    Icon(
+                                        Icons.Default.Stop,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(5.dp))
+                                    Text("إلغاء")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    schedulingTask?.let { task ->
+        var delayText by remember(task.id) { mutableStateOf("60") }
+        var repeatText by remember(task.id) { mutableStateOf("") }
+
+        val delayMinutes = delayText.toLongOrNull()
+        val repeatMinutes = repeatText.toLongOrNull()
+        val repeatValid = repeatText.isBlank() || (repeatMinutes != null && repeatMinutes >= 15L)
+
+        AlertDialog(
+            onDismissRequest = { schedulingTask = null },
+            title = { Text("جدولة: ${task.title}") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        "WorkManager يشغّل العمل في الخلفية عند توفر الشبكة. المواعيد تقريبية وليست منبهاً دقيقاً بالثانية.",
+                        fontSize = 12.sp
+                    )
+                    OutlinedTextField(
+                        value = delayText,
+                        onValueChange = { delayText = it.filter(Char::isDigit) },
+                        label = { Text("ابدأ بعد كم دقيقة؟") },
+                        singleLine = true
+                    )
+                    OutlinedTextField(
+                        value = repeatText,
+                        onValueChange = { repeatText = it.filter(Char::isDigit) },
+                        label = { Text("كرر كل كم دقيقة؟ اختياري، الحد الأدنى 15") },
+                        singleLine = true
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        onScheduleTask(task, delayMinutes!!, repeatMinutes)
+                        schedulingTask = null
+                    },
+                    enabled = delayMinutes != null && delayMinutes >= 0L && repeatValid
+                ) {
+                    Text("حفظ الجدولة")
+                }
+            },
+            dismissButton = {
+                OutlinedButton(onClick = { schedulingTask = null }) {
+                    Text("إلغاء")
+                }
+            }
+        )
+    }
+}
+
+@Composable
+fun SettingsView(
+    state: ToddState,
+    visualScreenRunning: Boolean,
+    lastVisualCaptureAt: Long,
+    accessibilityEnabled: Boolean,
+    notificationAccessEnabled: Boolean,
+    githubTokenConfigured: Boolean,
+    learnedMemories: List<MemoryEntry>,
+    activeRules: List<Rule>,
+    geminiApiKeyConfigured: Boolean,
+    selectedGeminiModel: GeminiCloudModel,
+    firebaseConfigured: Boolean,
+    firebaseProjectId: String?,
+    firebaseReason: String?,
+    localAIStatus: String,
+    localAIBusy: Boolean,
+    cloudAIStatus: String,
+    cloudAIBusy: Boolean,
+    onSaveGeminiApiKey: (String) -> Unit,
+    onClearGeminiApiKey: () -> Unit,
+    onGeminiModelChange: (GeminiCloudModel) -> Unit,
+    onCheckCloudAI: () -> Unit,
+    onCheckLocalAI: () -> Unit,
+    onPrepareLocalAI: () -> Unit,
+    onSaveFirebaseConfig: (String) -> Unit,
+    onClearFirebaseConfig: () -> Unit,
+    onSaveGitHubToken: (String) -> Unit,
+    onClearGitHubToken: () -> Unit,
+    onDeleteLearnedMemory: (MemoryEntry) -> Unit,
+    onSaveRule: (Rule) -> Unit,
+    diagnosticsReport: ToddDiagnosticReport?,
+    diagnosticsBusy: Boolean,
+    onRunDiagnostics: () -> Unit,
+    onAIModeChange: (AIProviderMode) -> Unit,
+    onOpenAccessibility: () -> Unit,
+    onOpenNotificationAccess: () -> Unit,
+    overlayEnabled: Boolean = false,
+    onStartOverlay: () -> Unit = {},
+    onStartVisualScreen: () -> Unit,
+    onStopVisualScreen: () -> Unit
+) {
+    var githubToken by remember { mutableStateOf("") }
+    var geminiApiKey by remember { mutableStateOf("") }
+    var firebaseConfigJson by remember { mutableStateOf("") }
+    var pendingMemoryDelete by remember { mutableStateOf<MemoryEntry?>(null) }
+    val context = LocalContext.current
+    val firebaseFileLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri ->
+        if (uri != null) {
+            val raw = runCatching {
+                context.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }
+                    ?: throw IllegalStateException("تعذر قراءة الملف المحدد.")
+            }
+            raw.onSuccess(onSaveFirebaseConfig)
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState())
+    ) {
+        Text("وضع توجيه الذكاء الاصطناعي (AI Routing)", fontWeight = FontWeight.Bold, color = Color.White)
+        Spacer(modifier = Modifier.height(8.dp))
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = state.aiMode == AIProviderMode.LOCAL_ONLY,
+                onClick = { onAIModeChange(AIProviderMode.LOCAL_ONLY) },
+                label = { Text("محلي فقط") }
+            )
+            FilterChip(
+                selected = state.aiMode == AIProviderMode.AUTO,
+                onClick = { onAIModeChange(AIProviderMode.AUTO) },
+                label = { Text("تلقائي (Auto)") }
+            )
+            FilterChip(
+                selected = state.aiMode == AIProviderMode.CLOUD_PREFERRED,
+                onClick = { onAIModeChange(AIProviderMode.CLOUD_PREFERRED) },
+                label = { Text("سحابي مسبق") }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(20.dp))
+        Text("ذكاء Todd النصي — Gemini API", fontWeight = FontWeight.Bold, color = Color.White)
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            if (geminiApiKeyConfigured) {
+                "المحادثة النصية السحابية مهيأة بمفتاح Gemini محفوظ ومشفّر داخل Android Keystore."
+            } else {
+                "أدخل مفتاح Gemini API مرة واحدة لتشغيل محادثة Todd النصية مباشرة، دون الحاجة إلى Firebase."
+            },
+            fontSize = 12.sp,
+            color = if (geminiApiKeyConfigured) Color(0xFF10B981) else Color(0xFFF59E0B)
+        )
+        Spacer(modifier = Modifier.height(10.dp))
+        Text("اختر نموذج Gemini حسب الحاجة", fontSize = 12.sp, color = Color(0xFFCBD5E1))
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(
+                selected = selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_5,
+                onClick = { onGeminiModelChange(GeminiCloudModel.FLASH_LITE_3_5) },
+                label = { Text("3.5 Flash-Lite") }
+            )
+            FilterChip(
+                selected = selectedGeminiModel == GeminiCloudModel.FLASH_3_8,
+                onClick = { onGeminiModelChange(GeminiCloudModel.FLASH_3_8) },
+                label = { Text("3.8 Flash") }
+            )
+        }
+        Text(
+            if (selectedGeminiModel == GeminiCloudModel.FLASH_LITE_3_5) {
+                "للعمل اليومي والطلبات الكثيرة."
+            } else {
+                "للبرمجة والمهام الصعبة."
+            },
+            fontSize = 11.sp,
+            color = Color(0xFF94A3B8)
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+        if (!geminiApiKeyConfigured) {
+            OutlinedTextField(
+                value = geminiApiKey,
+                onValueChange = { geminiApiKey = it.trim() },
+                label = { Text("مفتاح Gemini API") },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
                 modifier = Modifier.fillMaxWidth()
             )
             Spacer(modifier = Modifier.height(8.dp))

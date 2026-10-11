@@ -112,12 +112,14 @@ class WebSourceFetcher(
         private const val MAX_BYTES = 1_000_000
         private const val MAX_REDIRECTS = 3
         private val REDIRECT_CODES = setOf(301, 302, 303, 307, 308)
-        private val safeDns = Dns { hostname ->
-            val addresses = Dns.SYSTEM.lookup(hostname)
-            if (addresses.isEmpty() || addresses.any(::isNonPublicAddress)) {
-                throw UnknownHostException("Source host is not publicly routable")
+        private val safeDns: Dns = object : Dns {
+            override fun lookup(hostname: String): List<InetAddress> {
+                val addresses = Dns.SYSTEM.lookup(hostname)
+                if (addresses.isEmpty() || addresses.any(::isNonPublicAddress)) {
+                    throw UnknownHostException("Source host is not publicly routable")
+                }
+                return addresses
             }
-            addresses
         }
 
         private fun safeClient() = OkHttpClient.Builder()
