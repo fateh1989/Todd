@@ -265,7 +265,7 @@ class DirectGeminiInteractionClient(
         return textParts.joinToString("\n")
     }
 
-    private fun parseSources(root: JSONObject): List<AISource> {
+    internal fun parseSources(root: JSONObject): List<AISource> {
         val result = linkedMapOf<String, AISource>()
         val steps = root.optJSONArray("steps") ?: return emptyList()
         for (i in 0 until steps.length()) {
@@ -278,7 +278,13 @@ class DirectGeminiInteractionClient(
                 for (k in 0 until annotations.length()) {
                     val annotation = annotations.optJSONObject(k) ?: continue
                     if (annotation.optString("type") != "url_citation") continue
-                    val url = annotation.optString("url")
+                    // Gemini's Interactions API has returned URL citations as both
+                    // `url` and `uri` across its schema revisions. Accept either so
+                    // a real grounded response is not discarded as source-less.
+                    val url = sequenceOf("url", "uri", "source")
+                        .map { key -> annotation.optString(key).trim() }
+                        .firstOrNull { it.startsWith("https://", ignoreCase = true) }
+                        ?: continue
                     if (url.isBlank()) continue
                     result[url] = AISource(
                         title = annotation.optString("title").takeIf { it.isNotBlank() },
