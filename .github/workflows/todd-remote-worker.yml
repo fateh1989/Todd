@@ -196,6 +196,7 @@ jobs:
 
           find . \( -path "*/build/outputs/apk/*.apk" -o -path "*/build/outputs/apk/*/*.apk" \)             | sort > .todd-remote/apk-files.txt
 
+      - name: Remove previous artifact before upload
         if: always() && github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
