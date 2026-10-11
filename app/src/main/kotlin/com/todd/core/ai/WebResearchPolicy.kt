@@ -63,7 +63,8 @@ object WebResearchPolicy {
 
     private val ENGLISH_SIGNALS = listOf(
         "search online", "web search", "search the web", "research this", "do research",
-        "latest news", "current information", "find sources", "look up online"
+        "latest news", "current information", "find sources", "look up online",
+        "compare", "fact check"
     )
 
     fun simplifyQueryForSearch(prompt: String): String {

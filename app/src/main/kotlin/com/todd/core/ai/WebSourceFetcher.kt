@@ -73,7 +73,9 @@ interface ChromiumPageRenderer {
 class WebSourceFetcher(
     private val client: OkHttpClient = safeClient(),
     private val browserRenderer: ChromiumPageRenderer? = null,
-    private val logListener: WebAgentLogListener? = null
+    private val logListener: WebAgentLogListener? = null,
+    // Production uses guarded DNS. Tests may inject a public-only fake resolver.
+    private val validationDns: Dns = safeDns
 ) {
     private val sessionCache = ConcurrentHashMap<String, AISource>()
 
@@ -214,7 +216,7 @@ class WebSourceFetcher(
             throw cancelled
         } catch (e: Exception) {
             val errStatus = when {
-                e is java.net.SocketTimeoutException -> "TIMEOUT (انتهت مهلة استجابة الخادم)"
+                e is java.net.SocketTimeoutException -> "TIMEOUT"
                 e is UnknownHostException -> "DNS_OR_SSRF_BLOCKED (عنوان غير متاح أو حظر أمني)"
                 e.message?.contains("not publicly routable") == true -> "NON_PUBLIC_IP_DENIED (حظر عنوان شبكة خاصة SSRF)"
                 else -> "ERROR_${e::class.java.simpleName}"
@@ -343,7 +345,10 @@ class WebSourceFetcher(
         require(host != "localhost" && !host.endsWith(".localhost") &&
             !host.endsWith(".local") && !host.endsWith(".internal"))
         // Resolve with the same guarded OkHttp DNS path used by the actual connection.
-        safeDns.lookup(host)
+        val addresses = validationDns.lookup(host)
+        if (addresses.isEmpty() || addresses.any(::isNonPublicAddress)) {
+            throw UnknownHostException("Source host is not publicly routable")
+        }
         return uri
     }
 

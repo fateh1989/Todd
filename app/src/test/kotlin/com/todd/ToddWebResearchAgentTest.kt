@@ -5,6 +5,7 @@ import com.todd.core.ai.AISource
 import com.todd.core.ai.WebResearchPolicy
 import com.todd.core.ai.WebSourceFetcher
 import kotlinx.coroutines.runBlocking
+import okhttp3.Dns
 import okhttp3.Interceptor
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
@@ -17,8 +18,16 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.net.URI
+import java.net.InetAddress
 
 class ToddWebResearchAgentTest {
+
+    // Test-only resolver: all mock HTTP responses are intercepted before the network.
+    // Keep production's private/local address checks enabled.
+    private val fakePublicDns = object : Dns {
+        override fun lookup(hostname: String): List<InetAddress> =
+            listOf(InetAddress.getByAddress(byteArrayOf(8, 8, 8, 8)))
+    }
 
     // 1. سؤال بسيط يتطلب البحث عن معلومة (Simple factual query)
     @Test
@@ -85,7 +94,7 @@ class ToddWebResearchAgentTest {
             })
             .build()
 
-        val fetcher = WebSourceFetcher(client = mockClient)
+        val fetcher = WebSourceFetcher(client = mockClient, validationDns = fakePublicDns)
         val initialSources = domains.mapIndexed { idx, domain ->
             AISource(
                 url = "https://$domain/benchmark",
@@ -205,7 +214,7 @@ class ToddWebResearchAgentTest {
             })
             .build()
 
-        val fetcher = WebSourceFetcher(client = client)
+        val fetcher = WebSourceFetcher(client = client, validationDns = fakePublicDns)
 
         // Fetch same URL with different tracking parameters across two rounds
         val sourceRound1 = AISource(url = "https://example.org/article?utm_source=google", domain = "example.org")
@@ -278,7 +287,7 @@ class ToddWebResearchAgentTest {
             })
             .build()
 
-        val fetcher = WebSourceFetcher(client = client)
+        val fetcher = WebSourceFetcher(client = client, validationDns = fakePublicDns)
 
         val sources = listOf(
             AISource(url = "https://blocked.example.org/article", domain = "blocked.example.org"),
