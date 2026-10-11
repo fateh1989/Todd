@@ -13,6 +13,16 @@ Complete Todd as a native Android-first persistent personal AI agent with text/v
 - Canonical product definition: TODD_MASTER_SPEC.md
 - Google AI Studio continuation: GOOGLE_AI_STUDIO_BUILD_PROMPT.md
 
+## Active review branch — web research
+- Branch: `codex/research-agent` (separate from `main`).
+- Existing branch commit: `0192e06340709a9e710e592c52c645901be0e213` before the source-page evidence follow-up.
+- The branch adds explicit cited web research, privacy-aware intent handling, URL display, and local
+  source records. The follow-up adds guarded retrieval of up to three cited pages, short excerpts,
+  an evidence-based answer review, and honest unverified status for source records.
+- No APK is produced for this work unless the owner explicitly requests one.
+- Build and unit tests for this review branch have not passed in this environment because the Android
+  SDK is not installed; any source-page fetch behavior also needs a real-device/network check.
+
 ## Latest completed CI evidence
 - GitHub Actions secret configured: `TODD_SIGNING_BUNDLE` (single bundle containing all signing material).
 - Todd Android CI run 109 attempt 2 succeeded.

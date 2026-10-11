@@ -83,9 +83,18 @@ Cloud free tiers are optional bonuses, never a dependency.
   research.
 - Research instructions ask for primary sources, comparison where available, dates, uncertainty,
   and the user's stated region or time period. Todd does not infer or transmit device location.
-- Source URLs are shown in the answer, open when tapped, and are saved with scheduled research
-  results. The returned URLs are not an independent verification that each page's contents support
-  every claim; full page fetching and claim-by-claim evidence checks remain future work.
+- Todd now attempts to fetch a small excerpt from up to three cited pages, blocks non-public
+  destinations and unsafe redirects, and asks the model to review its draft against those excerpts.
+  Excerpts are shown beside the links so the user can inspect the supporting text.
+- Research requests exclude the phone screen, screen image, and project context by default; location
+  must be stated in the user's query. No GPS permission or coordinates are used. The cloud search
+  provider and HTTPS source sites still receive network requests and may infer approximate location
+  from the network IP; Todd cannot promise IP anonymity.
+- Page fetching can fail on paywalls, JavaScript-only sites, bot checks, unsupported content types,
+  or network errors. A fetched excerpt is partial evidence, not proof of every claim; the answer
+  remains explicitly unverified, and saved source records are not marked verified.
+- Research still depends on the configured Gemini cloud search. No separate paid search or scraping
+  service was added. Local Only does not send research requests to the network.
 - Live web research requires a cloud-enabled AI mode. **Local Only** explains this and does not send
   the research request to the network.
 

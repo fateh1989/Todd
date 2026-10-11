@@ -16,6 +16,7 @@ import com.todd.core.ai.AIRouter
 import com.todd.core.ai.AISource
 import com.todd.core.ai.WebResearchPolicy
 import com.todd.core.ai.WebResearchUnavailableException
+import com.todd.core.ai.WebSourceFetcher
 import com.todd.core.ai.DirectGeminiInteractionClient
 import com.todd.core.ai.DirectToolCall
 import com.todd.core.ai.DirectToolDefinition
@@ -62,7 +63,8 @@ class ToddTextAgent(
     private val rulesEngine: RulesEngine,
     private val directInteractionClient: DirectGeminiInteractionClient? = null,
     private val promptLibrary: ToddPromptLibrary? = null,
-    private val modelName: String = "gemini-3.8-flash"
+    private val modelName: String = "gemini-3.8-flash",
+    private val webSourceFetcher: WebSourceFetcher = WebSourceFetcher()
 ) {
 
     suspend fun respond(
@@ -70,7 +72,14 @@ class ToddTextAgent(
         mode: AIProviderMode
     ): Result<AIResponse> = withContext(Dispatchers.IO) {
         val researchRequested = WebResearchPolicy.isRequested(request)
-        val researchAwareRequest = request.copy(webResearch = researchRequested)
+        // A web query should not inherit phone-screen or project data (which may reveal
+        // location or identity) unless the user includes it in the query itself.
+        val researchAwareRequest = request.copy(
+            webResearch = researchRequested,
+            screenContext = if (researchRequested) null else request.screenContext,
+            screenImagePath = if (researchRequested) null else request.screenImagePath,
+            projectContext = if (researchRequested) null else request.projectContext
+        )
         val guidedRequest = promptLibrary?.enrich(researchAwareRequest) ?: researchAwareRequest
         if (mode == AIProviderMode.LOCAL_ONLY) {
             if (researchRequested) {
@@ -93,8 +102,15 @@ class ToddTextAgent(
             )
             if (directResult.isSuccess) {
                 val result = directResult.getOrThrow()
-                if (!researchRequested || result.sources.isNotEmpty()) {
-                    return@withContext Result.success(result)
+                if (!researchRequested) return@withContext Result.success(result)
+                if (result.sources.isNotEmpty()) {
+                    return@withContext Result.success(
+                        reviewFetchedEvidence(
+                            question = guidedRequest.prompt,
+                            response = result,
+                            directClient = directClient
+                        )
+                    )
                 }
                 // A successful model response without citations is not a successful live search.
             }
@@ -160,8 +176,23 @@ class ToddTextAgent(
                         )
                     }
 
+                    val reviewed = if (researchRequested) {
+                        reviewFetchedEvidence(
+                            question = guidedRequest.prompt,
+                            response = AIResponse(
+                                text = text,
+                                providerUsed = ProviderType.CLOUD_GEMINI,
+                                isVerified = false,
+                                tokensUsed = (prompt.length + text.length) / 4,
+                                latencyMs = System.currentTimeMillis() - startedAt,
+                                sources = sources
+                            ),
+                            firebaseReviewEnabled = true
+                        )
+                    } else null
+
                     return@withContext Result.success(
-                        AIResponse(
+                        reviewed ?: AIResponse(
                             text = text,
                             providerUsed = ProviderType.CLOUD_GEMINI,
                             isVerified = false,
@@ -199,6 +230,56 @@ class ToddTextAgent(
             val fallback = aiRouter.route(guidedRequest, mode)
             if (fallback.isSuccess) fallback else Result.failure(e)
         }
+    }
+
+    private suspend fun reviewFetchedEvidence(
+        question: String,
+        response: AIResponse,
+        directClient: DirectGeminiInteractionClient? = null,
+        firebaseReviewEnabled: Boolean = false
+    ): AIResponse {
+        val enrichedSources = try {
+            webSourceFetcher.fetch(response.sources)
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            response.sources
+        }
+        if (enrichedSources.none { !it.excerpt.isNullOrBlank() }) {
+            return response.copy(sources = enrichedSources)
+        }
+
+        val reviewedText = try {
+            when {
+                directClient != null -> directClient.reviewResearchEvidence(
+                    question = question,
+                    draft = response.text,
+                    sources = enrichedSources
+                )
+                firebaseReviewEnabled && FirebaseRuntimeConfig.current().configured -> {
+                    Firebase.ai(
+                        app = FirebaseRuntimeConfig.requireConfiguredApp(),
+                        backend = GenerativeBackend.googleAI()
+                    ).generativeModel(modelName = modelName)
+                        .generateContent(
+                            WebResearchPolicy.evidenceReviewPrompt(
+                                question, response.text, enrichedSources
+                            )
+                        ).text
+                }
+                else -> null
+            }
+        } catch (cancelled: kotlinx.coroutines.CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            null
+        }?.trim()?.takeIf { it.isNotBlank() }
+
+        return response.copy(
+            text = reviewedText ?: response.text,
+            sources = enrichedSources,
+            isVerified = false
+        )
     }
 
     private suspend fun sendInitialMessage(

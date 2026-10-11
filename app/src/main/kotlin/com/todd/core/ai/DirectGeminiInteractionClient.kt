@@ -49,6 +49,26 @@ class DirectGeminiInteractionClient(
 
     suspend fun isAvailable(): Boolean = !apiKeyProvider().isNullOrBlank()
 
+    /** Re-checks a search draft against fetched page excerpts before Todd presents it. */
+    suspend fun reviewResearchEvidence(
+        question: String,
+        draft: String,
+        sources: List<AISource>
+    ): String? = withContext(Dispatchers.IO) {
+        val evidence = sources.filter { !it.excerpt.isNullOrBlank() }.take(WebSourceFetcher.MAX_SOURCES)
+        if (evidence.isEmpty()) return@withContext null
+
+        val apiKey = apiKeyProvider()?.trim().orEmpty()
+        if (apiKey.isBlank()) return@withContext null
+        val response = postInteraction(
+            apiKey = apiKey,
+            body = JSONObject()
+                .put("model", modelNameProvider())
+                .put("input", WebResearchPolicy.evidenceReviewPrompt(question, draft, evidence))
+        )
+        parseModelText(response).trim().takeIf { it.isNotBlank() }
+    }
+
     suspend fun respond(
         request: AIRequest,
         prompt: String,

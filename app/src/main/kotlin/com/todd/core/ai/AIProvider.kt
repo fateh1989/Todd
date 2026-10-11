@@ -33,7 +33,11 @@ data class AIRequest(
 data class AISource(
     val title: String? = null,
     val url: String,
-    val domain: String? = null
+    val domain: String? = null,
+    /** A short, best-effort page excerpt; its presence does not itself verify a claim. */
+    val excerpt: String? = null,
+    /** Stable 1-based position in the original search-citation list. */
+    val citationIndex: Int? = null
 )
 
 data class AIResponse(
