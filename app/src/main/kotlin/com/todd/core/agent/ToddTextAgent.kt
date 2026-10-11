@@ -71,6 +71,19 @@ class ToddTextAgent(
         request: AIRequest,
         mode: AIProviderMode
     ): Result<AIResponse> = withContext(Dispatchers.IO) {
+        // A simple greeting is a new conversational turn, not an invitation to
+        // resume a previous coding task or disclose persistent device context.
+        // Keep all stored memories intact for requests that actually need them.
+        if (ChatGreetingPolicy.isStandaloneGreeting(request)) {
+            val greetingRequest = request.copy(
+                selectedText = null,
+                screenContext = null,
+                screenImagePath = null,
+                projectContext = null
+            )
+            return@withContext aiRouter.route(greetingRequest, mode)
+        }
+
         val researchRequested = WebResearchPolicy.isRequested(request)
         // A web query should not inherit phone-screen or project data (which may reveal
         // location or identity) unless the user includes it in the query itself.
